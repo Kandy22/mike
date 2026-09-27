@@ -1887,6 +1887,7 @@ export interface DocumentVersion {
     file_type?: string | null;
     size_bytes?: number | null;
     page_count?: number | null;
+    textless_page_count?: number | null;
     deleted_at?: string | null;
     deleted_by?: string | null;
 }
