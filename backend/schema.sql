@@ -2926,6 +2926,7 @@ returns table (
   pdf_storage_path text,
   size_bytes integer,
   page_count integer,
+  textless_page_count integer,
   active_version_number integer
 )
 language sql
@@ -2948,6 +2949,7 @@ as $$
     v.pdf_storage_path,
     v.size_bytes,
     v.page_count,
+    v.textless_page_count,
     v.version_number as active_version_number
   from public.documents d
   left join public.document_versions v
