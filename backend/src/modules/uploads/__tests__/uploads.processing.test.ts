@@ -9,6 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
+import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { diagnosticErrorTags } from "../../../lib/observability/sentryPrivacy";
 
@@ -502,6 +503,92 @@ describe("upload processing", () => {
     expect(mocks.uploadFileFromPath).not.toHaveBeenCalled();
   });
 
+  it.each([false, undefined])("replaces DOCX bytes with generate_pdf=%s and invalidates obsolete renditions", async (generatePdf) => {
+    const db = scriptedDb([
+      { data: { id: "v", storage_path: "old/source.docx", pdf_storage_path: "old/rendition.pdf", content_sha256: "a".repeat(64) } },
+      { data: { id: "v" } },
+    ]);
+    expect(await processUploadFile(db as never, {
+      ...baseSession,
+      purpose: "document_version_replace",
+      destination: {
+        document_id: "doc", version_id: "v", expected_content_sha256: "a".repeat(64),
+        ...(generatePdf === undefined ? {} : { generate_pdf: generatePdf }),
+      },
+    }, { ...baseFile, filename: "edited.docx", file_type: "docx" })).toEqual({ id: "v" });
+
+    expect(mocks.copyFile).toHaveBeenCalledOnce();
+    expect(mocks.officeFileToPdf).toHaveBeenCalledTimes(generatePdf === false ? 0 : 1);
+    expect(mocks.uploadFileFromPath).toHaveBeenCalledTimes(generatePdf === false ? 0 : 1);
+    expect(db.calls).toContainEqual(expect.objectContaining({
+      table: "document_versions", operation: "update",
+      payload: expect.objectContaining({
+        storage_path: expect.stringMatching(/\/versions\/[^/]+\.docx$/),
+        filename: "edited.docx",
+        content_sha256: createHash("sha256").update(Buffer.from([1, 2, 3, 4])).digest("hex"),
+        pdf_storage_path: generatePdf === false ? null : expect.stringContaining("converted-pdfs/"),
+        page_count: null,
+      }),
+    }));
+  });
+
+  it("keeps a PDF source as its own rendition when generation is disabled", async () => {
+    const db = scriptedDb([
+      { data: { id: "v", storage_path: "old/source.pdf" } },
+      { data: { id: "v" } },
+    ]);
+    await processUploadFile(db as never, {
+      ...baseSession, purpose: "document_version_replace",
+      destination: { document_id: "doc", version_id: "v", generate_pdf: false },
+    }, baseFile);
+    const patch = db.calls.find((call) => call.operation === "update")?.payload as Record<string, unknown>;
+    expect(patch.pdf_storage_path).toBe(patch.storage_path);
+    expect(mocks.officeFileToPdf).not.toHaveBeenCalled();
+  });
+
+  it("rejects a stale editor save before copying any replacement bytes", async () => {
+    const db = fakeDb({ document_versions: [{ data: { id: "v", storage_path: "old/key", content_sha256: "b".repeat(64) } }] });
+    await expect(processUploadFile(db as never, {
+      ...baseSession, purpose: "document_version_replace",
+      destination: { document_id: "doc", version_id: "v", expected_content_sha256: "a".repeat(64) },
+    }, baseFile)).rejects.toThrow("document_changed");
+    expect(mocks.copyFile).not.toHaveBeenCalled();
+  });
+
+  it("treats an already-committed editor save as a successful retry", async () => {
+    const current = { id: "v", storage_path: "saved/key", content_sha256: createHash("sha256").update(Buffer.from([1, 2, 3, 4])).digest("hex") };
+    const db = fakeDb({ document_versions: [{ data: current }] });
+    expect(await processUploadFile(db as never, {
+      ...baseSession, purpose: "document_version_replace",
+      destination: { document_id: "doc", version_id: "v", expected_content_sha256: "a".repeat(64) },
+    }, baseFile)).toMatchObject({ id: "v" });
+    expect(mocks.copyFile).not.toHaveBeenCalled();
+  });
+
+  it("reports a concurrent update during conversion and records orphaned replacement objects", async () => {
+    const db = fakeDb({ document_versions: [
+      { data: { id: "v", storage_path: "old/key", content_sha256: "a".repeat(64) } },
+      { data: null, error: null },
+    ] });
+    await expect(processUploadFile(db as never, {
+      ...baseSession, purpose: "document_version_replace",
+      destination: { document_id: "doc", version_id: "v", expected_content_sha256: "a".repeat(64) },
+    }, baseFile)).rejects.toMatchObject({ message: "document_changed", orphanedKeys: expect.arrayContaining([expect.stringContaining("doc")]) });
+  });
+
+  it("hashes legacy stored bytes when the version has no recorded checksum", async () => {
+    const db = fakeDb({ document_versions: [
+      { data: { id: "v", storage_path: "old/key", content_sha256: null } },
+      { data: { id: "v" } },
+    ] });
+    const expected = createHash("sha256").update(Buffer.from([1, 2, 3, 4])).digest("hex");
+    expect(await processUploadFile(db as never, {
+      ...baseSession, purpose: "document_version_replace",
+      destination: { document_id: "doc", version_id: "v", expected_content_sha256: expected },
+    }, baseFile)).toEqual({ id: "v" });
+    expect(mocks.createFileReadStream).toHaveBeenCalledWith("old/key");
+  });
+
   // The upsert that makes a retry idempotent is also what brings a document
   // the user deleted mid-processing back from the dead. Only a row this
   // upload already wrote (marker set) can have been deleted.
@@ -712,6 +799,26 @@ describe("upload processing", () => {
       processUploadJob(db as never, "job-1", "worker-1"),
     ).rejects.toThrow("upload_job_lease_lost");
     expect(mocks.createFileReadStream).not.toHaveBeenCalled();
+  });
+
+  it("reports an editor conflict as terminal instead of retrying an overwrite", async () => {
+    const db = scriptedDb([
+      { data: { id: "job-1", session_id: baseSession.id, file_id: baseFile.id, attempts: 1, locked_by: "worker-1" } },
+      { data: { ...baseSession, purpose: "document_version_replace", destination: { document_id: "doc", version_id: "v", expected_content_sha256: "a".repeat(64) } } },
+      { data: baseFile },
+      { data: { id: "job-1" } },
+      { error: null },
+      { data: { id: "v", storage_path: "old/key", content_sha256: "b".repeat(64) } },
+      { data: { id: "job-1" } },
+      { error: null },
+      { data: { id: "job-1" } },
+      { data: [] },
+      { data: { id: "job-1" } },
+    ]);
+    await processUploadJob(db as never, "job-1", "worker-1");
+    expect(db.calls).toContainEqual(expect.objectContaining({ table: "upload_session_files", operation: "update", payload: expect.objectContaining({ error_code: "document_changed" }) }));
+    expect(db.calls.some((call) => call.table === "upload_processing_jobs" && (call.payload as { status?: string })?.status === "queued")).toBe(false);
+    expect(db.remaining).toHaveLength(0);
   });
 
   it("removes stale temporary upload directories left by an interrupted worker", async () => {
