@@ -12,14 +12,14 @@ import {
     Pencil,
     Trash2,
     Upload,
-    X,
 } from "lucide-react";
 import { ConfirmPopup } from "@/app/components/popups/ConfirmPopup";
 import { FileTypeIcon } from "@/app/components/shared/FileTypeIcon";
+import { DocumentPaneTitle } from "@/app/components/shared/DocumentPaneTitle";
 import { PdfView } from "@/app/components/shared/views/PdfView";
 import { DocxView } from "@/app/components/shared/views/DocxView";
 import { SpreadsheetView } from "@/app/components/shared/views/SpreadsheetView";
-import { GlassIconButtonUI } from "@/shared/ui/GlassIconButtonUI";
+import { CloseButton } from "@/shared/ui/CloseButton";
 import { PillButtonUI } from "@/shared/ui/PillButtonUI";
 import { WarningPopup } from "@/app/components/popups/WarningPopup";
 import type { Document } from "@/app/components/shared/types";
@@ -137,6 +137,9 @@ export function DocumentSidePanel({
         "document",
     );
     const panelRef = useRef<HTMLDivElement>(null);
+    // Menus and popups opened from the panel portal outside its DOM, but their
+    // events still propagate through the panel's React tree.
+    const panelEvents = useRef(new WeakSet<Event>());
     const fileInputRef = useRef<HTMLInputElement>(null);
     const replaceFileInputRef = useRef<HTMLInputElement>(null);
     const dragStartX = useRef(0);
@@ -185,7 +188,8 @@ export function DocumentSidePanel({
             const target = event.target;
             if (
                 !(target instanceof Node) ||
-                panelRef.current?.contains(target)
+                panelRef.current?.contains(target) ||
+                panelEvents.current.has(event)
             ) {
                 return;
             }
@@ -233,7 +237,13 @@ export function DocumentSidePanel({
     const activeDoc = doc;
     const documentId = activeDoc.id;
     const newVersionAccept = ".pdf,.docx,.doc,.xlsx,.xlsm,.xls,.pptx,.ppt";
-    const orderedVersions = [...versions].reverse();
+    // Latest first: by version number, then by upload time.
+    const orderedVersions = [...versions].sort(
+        (a, b) =>
+            (b.version_number ?? -Infinity) -
+                (a.version_number ?? -Infinity) ||
+            b.created_at.localeCompare(a.created_at),
+    );
     const activeVersionCount = versions.filter(
         (version) => version.deleted_at == null,
     ).length;
@@ -476,6 +486,9 @@ export function DocumentSidePanel({
     return createPortal(
         <div
             ref={panelRef}
+            onPointerDownCapture={(event) =>
+                panelEvents.current.add(event.nativeEvent)
+            }
             className={cn(
                 "fixed z-[190] flex flex-col",
                 LIQUID_FLOAT_PANEL_SURFACE_CLASS,
@@ -488,16 +501,7 @@ export function DocumentSidePanel({
                 className="absolute inset-y-0 left-0 z-20 hidden w-1 cursor-col-resize bg-transparent transition-colors hover:bg-blue-400/60 md:block"
                 title="Resize document view"
             />
-            <div className="mx-3 flex min-h-11 shrink-0 items-center justify-between gap-3 py-2 md:h-11 md:py-0">
-                <div className="flex min-w-0 items-center gap-2">
-                    <FileTypeIcon
-                        fileType={selectedFileType ?? selectedFilename}
-                        className="h-4 w-4"
-                    />
-                    <div className="min-w-0 truncate text-sm font-medium text-gray-700">
-                        {selectedFilename}
-                    </div>
-                </div>
+            <div className="flex shrink-0 justify-end px-3 py-2 md:absolute md:right-3 md:top-3 md:z-20 md:p-0">
                 <div className="flex shrink-0 items-center gap-1.5">
                     <div className="flex h-7 items-center rounded-full bg-gray-200/70 p-0.5 md:hidden">
                         <button
@@ -525,9 +529,7 @@ export function DocumentSidePanel({
                             Details
                         </button>
                     </div>
-                    <GlassIconButtonUI onClick={onClose} aria-label="Close">
-                        <X className="h-3.5 w-3.5" />
-                    </GlassIconButtonUI>
+                    <CloseButton onClick={onClose} label="Close panel" />
                 </div>
             </div>
 
@@ -541,13 +543,19 @@ export function DocumentSidePanel({
             >
                 <section
                     className={cn(
-                        "min-h-0 min-w-0 p-3 pt-0 md:flex md:pr-0",
+                        "min-h-0 min-w-0 flex-col md:flex",
                         mobilePane === "document" ? "flex" : "hidden",
                     )}
                 >
-                    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+                    <DocumentPaneTitle
+                        filename={selectedFilename}
+                        fileType={selectedFileType}
+                        versionNumber={selectedVersionNumber}
+                    />
+                    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
                         {selectedViewType === "spreadsheet" ? (
                             <SpreadsheetView
+                                rounded="top-right"
                                 key={`${selectedVersionId ?? "current"}:${selectedUploadedAt ?? ""}:${selectedSizeBytes ?? ""}`}
                                 documentId={doc.id}
                                 versionId={selectedVersionId}
@@ -555,6 +563,10 @@ export function DocumentSidePanel({
                             />
                         ) : selectedViewType === "docx" ? (
                             <DocxView
+                                rounded="top-right"
+                                // A read-only preview: no EigenPal editing toolbar.
+                                toolbarVisible={false}
+                                filename={doc.filename}
                                 key={`${selectedVersionId ?? "current"}:${selectedUploadedAt ?? ""}:${selectedSizeBytes ?? ""}`}
                                 documentId={doc.id}
                                 versionId={selectedVersionId}
@@ -562,6 +574,7 @@ export function DocumentSidePanel({
                             />
                         ) : (
                             <PdfView
+                                rounded="top-right"
                                 key={`${selectedVersionId ?? "current"}:${selectedUploadedAt ?? ""}:${selectedSizeBytes ?? ""}`}
                                 doc={{
                                     document_id: doc.id,
@@ -584,7 +597,7 @@ export function DocumentSidePanel({
 
                 <aside
                     className={cn(
-                        "mt-2 mr-3 ml-5 min-h-0 flex-col",
+                        "mt-2 mr-3 ml-5 min-h-0 flex-col md:mt-11",
                         mobilePane === "details" ? "flex" : "hidden md:flex",
                     )}
                 >
