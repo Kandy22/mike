@@ -145,15 +145,12 @@ test("rename chat: sidebar rename interaction updates the title", async ({ page 
     await expect(renameItem).toBeVisible({ timeout: 5_000 });
     await renameItem.click();
 
-    // ── Step 7: type the new title in the inline input ───────────────────────────
-    // SidebarChatItem.tsx lines 56-68: isRenaming state shows an <input type="text">
-    // that is focused automatically (editInputRef.current?.focus() in useEffect).
-    // There is no data-testid; scope to the item container to avoid ambiguity.
-    const renameInput = activeItem.locator("input[type='text']");
+    // ── Step 7: type the new title in the rename modal ───────────────────────────
+    // "Rename" opens the shared RenameModal (breadcrumbs Assistant > Rename
+    // Chat) with a "Chat title" field; submitting the form saves.
+    const renameInput = page.getByLabel("Chat title");
     await expect(renameInput).toBeVisible({ timeout: 5_000 });
     await renameInput.fill(newTitle);
-
-    // SidebarChatItem.tsx line 63: Enter key calls handleRenameSave()
     await renameInput.press("Enter");
 
     // ── Step 8: assert the new title appears in the sidebar ──────────────────────
