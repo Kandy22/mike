@@ -7,14 +7,19 @@ import type { AssistantEvent, Chat } from "@/app/components/shared/types";
 // the reporter's own suite covers what it does with it.
 const reportApiFailure = vi.hoisted(() => vi.fn());
 const reportNetworkFailure = vi.hoisted(() => vi.fn());
+const markErrorHandled = vi.hoisted(() => vi.fn());
 vi.mock("@/app/lib/errorReporting", () => ({
     trackPendingRequest: () => () => {},
+    markErrorHandled,
     reportApiFailure,
     reportNetworkFailure,
 }));
 
+import { userFacingApiError } from "./userFacingError";
 import {
     MikeApiError,
+    SCHEMA_OUT_OF_DATE_MESSAGE,
+    UPSTREAM_UNAVAILABLE_MESSAGE,
     addDocumentToProject,
     clearTabularCells,
     completeUserOnboarding,
@@ -462,6 +467,35 @@ describe("apiRequest plumbing (via thin wrappers)", () => {
             // console.error(..., error) is not reported twice.
             error: expect.any(MikeApiError),
         });
+    });
+
+    // MIKE-BACKEND-H / MIKE-FRONTEND-F: a missing migration used to reach
+    // the screen as "Something went wrong" and be filed twice (backend and
+    // browser). An unreachable backend made the gateway answer 502 and the
+    // browser file one issue PER ENDPOINT. The server side now answers 503
+    // with a code and reports it once itself; the browser shows the
+    // intentional message and only marks the error.
+    it.each([
+        ["schema_out_of_date", SCHEMA_OUT_OF_DATE_MESSAGE, "The server's database needs an update before this can load. Please contact your administrator."],
+        ["upstream_unavailable", UPSTREAM_UNAVAILABLE_MESSAGE, "The server is temporarily unreachable. Please try again shortly."],
+    ])("shows the %s message and leaves the report to the server side", async (code, message, sentence) => {
+        markErrorHandled.mockClear();
+        fetchMock.mockResolvedValue(
+            jsonResponse(
+                {
+                    code,
+                    detail: "raw server text that must not be trusted",
+                    request_id: "req-503-1",
+                },
+                { status: 503 },
+            ),
+        );
+
+        const error = await getUserProfile().catch((caught: unknown) => caught);
+        expect(error).toMatchObject({ status: 503, code, requestId: "req-503-1", message });
+        expect(userFacingApiError(error, "Fallback")).toBe(sentence);
+        expect(reportApiFailure).not.toHaveBeenCalled();
+        expect(markErrorHandled).toHaveBeenCalledExactlyOnceWith(error);
     });
 
     it("reports a 5xx without a code and never reports a 4xx", async () => {
