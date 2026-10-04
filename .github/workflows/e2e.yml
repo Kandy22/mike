@@ -388,12 +388,22 @@ jobs:
 
       # Precompile static routes so cold Turbopack work does not consume UI
       # assertion budgets. Development overlays remain visible to the tests.
+      # Dynamic routes are warmed too: with parallel workers on a throttled
+      # CPU, the first `next dev` compile of /projects/[id] overran a 15 s
+      # navigation wait (stress runs have zero retries). A placeholder id is
+      # enough to compile the route; its status code doesn't matter here.
       - name: Warm development routes
         if: matrix.renderer == 'development'
         run: |
           for route in login assistant projects tabular-reviews workflows settings; do
             curl --fail --silent --max-time 120 "http://localhost:3000/$route" > /dev/null
           done
+          for route in assistant/chat/warm projects/warm projects/warm/assistant/chat/warm \
+            projects/warm/folders/warm projects/warm/tabular-reviews/warm tabular-reviews/warm \
+            workflows/assistant/warm workflows/tabular-review/warm; do
+            curl --silent --max-time 180 --output /dev/null "http://localhost:3000/$route" &
+          done
+          wait
 
       # playwright.config.ts sets webServer to undefined when CI=true, so the job
       # is responsible for the servers above; Playwright just drives them.
