@@ -53,17 +53,19 @@ test.describe("unauthenticated", () => {
 
     test("login with valid credentials redirects to /assistant", async ({
         page,
+        e2eAccount,
+        workerStorageState,
     }) => {
-        /* Use the SAME credentials auth.setup.ts bootstrapped the shared user
-           with. Both read process.env.E2E_EMAIL / E2E_PASSWORD (falling back to
-           the local defaults). CI overrides E2E_PASSWORD to a value DIFFERENT
-           from the old hardcoded "E2eTestPass1!", so hardcoding it here typed a
-           password the user was never created with → signInWithPassword failed,
-           the error banner rendered, and the /assistant redirect never fired.
-           Reading the env keeps the typed password in lock-step with the
-           bootstrapped one in every environment. */
-        const email = process.env.E2E_EMAIL ?? "e2e@mike.local";
-        const password = process.env.E2E_PASSWORD ?? "E2eTestPass1!";
+        /* Sign in as THIS worker's account (e2eAccount; e2e@mike.local on
+           worker 0). Depending on `workerStorageState` makes Playwright run the
+           worker fixture first, which creates the account and finishes its
+           onboarding; this test's own page stays signed out because the
+           describe overrides `storageState`. Without that dependency, a run
+           on worker 1+ could log in as a user another worker has not
+           onboarded yet and land on /onboarding/profile instead of
+           /assistant. */
+        void workerStorageState;
+        const { email, password } = e2eAccount;
 
         await page.goto("/login");
         await expect(page).toHaveURL(/\/login/);
