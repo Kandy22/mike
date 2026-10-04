@@ -63,12 +63,15 @@ details takes the `e2eAccount` fixture instead of hardcoding an email.
 `e2e/assistant-streaming.spec.ts` and `e2e/tabular-chat-lifecycle.spec.ts` form
 the Playwright **`synthetic`** project. They mock every `/api` call in the
 browser and need no backend, database, account or model-provider key, so CI
-runs them in a separate job that serves only the web app, on four parallel
-workers: **Assistant streaming (production)** on every PR, and **Assistant
-streaming (development)** against `next dev` as a stress job. The streaming
-tests are slow by design (4x CPU throttling and hundreds of SSE chunks, up to
-two minutes each), so keeping them out of the full-stack job is what keeps that
-job short. See [frontend-testing.md](frontend-testing.md#assistant-streaming-regressions)
+runs them in a separate job that serves only the web app. The streaming tests
+are slow by design (4x CPU throttling and hundreds of SSE chunks, up to two
+minutes each), and four of them on one 4-vCPU runner slowed each other about
+2.5x, so the job is a matrix of three runners split by chat scope: `assistant`,
+`project` and `rest` (every other synthetic test, so a new one is never
+dropped), each on two workers. On every PR they report as **Assistant streaming
+(production, assistant | project | rest)**; the `development` renderer against
+`next dev` is a stress job. Keeping them out of the full-stack job is what
+keeps that job short. See [frontend-testing.md](frontend-testing.md#assistant-streaming-regressions)
 for a standalone local command.
 
 Four live-provider cases remain key-gated; the synthetic streaming and history
@@ -79,7 +82,7 @@ truth for totals, failures and skips.
 
 Three jobs run against React's development renderer, which is 3-4x slower than
 the production build: **`e2e / Playwright (development stress)`** (~25-35 min),
-**`e2e / Assistant streaming (development)`** (~20-27 min) and **`Word add-in /
+**`e2e / Assistant streaming (development, …)`** (~20-27 min before the split) and **`Word add-in /
 Development stress (chromium + webkit)`** (~18-24 min). They were the last checks
 to finish on every slow PR, so they are off the default PR path. They run:
 
@@ -208,7 +211,7 @@ suite go green a few times (it is environment-sensitive by nature):
 2. Enable **Require status checks to pass before merging**.
 3. Enable **Require branches to be up to date before merging**.
 4. In the checks search box add **`e2e / playwright`**,
-   **`e2e / Assistant streaming (production)`** and
+   the three **`e2e / Assistant streaming (production, assistant|project|rest)`** checks and
    **`Word add-in / Typecheck and Playwright (chromium + webkit)`**. Jobs appear
    in the list after they have run at least once on a PR. Do not require the
    development-stress checks; they only run on PRs labelled `stress` (see

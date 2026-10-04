@@ -58,21 +58,26 @@ jobs:
     # needs only the web app: no Supabase, backend or account. Running it here
     # keeps the full-stack job short. The streaming tests are slow by design
     # (4x CPU throttling, hundreds of SSE chunks; up to ~2 min each), and share
-    # nothing, so they run on parallel workers. The production renderer runs on
-    # every PR; the development renderer, which alone surfaces React's
-    # passive-update-depth warning, is a stress job (see above).
-    name: ${{ matrix.renderer == 'production' && 'Assistant streaming (production)' || 'Assistant streaming (development)' }}
+    # nothing. Four of them on one 4-vCPU runner slowed each other ~2.5x
+    # (120 s -> 300 s), so they are split across runners by chat scope: the
+    # assistant and project pairs (~2-3 min each) get a runner each, and
+    # `rest` takes every other synthetic test, so a new test is never dropped.
+    # The production renderer runs on every PR; the development renderer,
+    # which alone surfaces React's passive-update-depth warning, is a stress
+    # job (see above).
+    name: Assistant streaming (${{ matrix.renderer }}, ${{ matrix.group }})
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         renderer: ${{ fromJSON((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'stress')) && '["production","development"]' || '["production"]') }}
+        group: [assistant, project, rest]
     runs-on: ubuntu-latest
     env:
       PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
       SENTRY_DISABLED: "true"
       NEXT_PUBLIC_SENTRY_DISABLED: "true"
-      E2E_WORKERS: "4"
+      E2E_WORKERS: "2"
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.0.0
@@ -113,12 +118,17 @@ jobs:
           fi
           # Development stress keeps zero retries so an intermittent loop
           # cannot pass on a retry; production uses the config's CI retries.
-          npx playwright test --project=synthetic \
+          case "${{ matrix.group }}" in
+            assistant) filter=(--grep "long assistant conversations") ;;
+            project) filter=(--grep "long project conversations") ;;
+            rest) filter=(--grep-invert "long (assistant|project) conversations") ;;
+          esac
+          npx playwright test --project=synthetic "${filter[@]}" \
             ${{ matrix.renderer == 'development' && '--retries=0 --trace=retain-on-failure' || '' }}
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: assistant-streaming-${{ matrix.renderer }}
+          name: assistant-streaming-${{ matrix.renderer }}-${{ matrix.group }}
           path: |
             playwright-report/
             test-results/
