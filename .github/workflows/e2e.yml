@@ -52,17 +52,27 @@ concurrency:
 # check as skipped, and a skipped check counts as passing — masking a red run.
 
 jobs:
-  assistant-streaming:
-    # React's passive-update warning is development-only. Keep the focused,
-    # keyless streaming regression on next dev as well as the production suite.
-    name: Assistant streaming (development)
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'stress')
+  synthetic:
+    # The Playwright `synthetic` project (assistant-streaming and
+    # tabular-chat-lifecycle) mocks every /api call inside the browser, so it
+    # needs only the web app: no Supabase, backend or account. Running it here
+    # keeps the full-stack job short. The streaming tests are slow by design
+    # (4x CPU throttling, hundreds of SSE chunks; up to ~2 min each), and share
+    # nothing, so they run on parallel workers. The production renderer runs on
+    # every PR; the development renderer, which alone surfaces React's
+    # passive-update-depth warning, is a stress job (see above).
+    name: ${{ matrix.renderer == 'production' && 'Assistant streaming (production)' || 'Assistant streaming (development)' }}
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        renderer: ${{ fromJSON((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'stress')) && '["production","development"]' || '["production"]') }}
     runs-on: ubuntu-latest
     env:
       PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
       SENTRY_DISABLED: "true"
       NEXT_PUBLIC_SENTRY_DISABLED: "true"
+      E2E_WORKERS: "4"
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.0.0
@@ -77,9 +87,16 @@ jobs:
       - name: Ensure lightningcss native binary
         run: npm install --no-save lightningcss --prefix frontend
       - run: npx playwright install --with-deps chromium
-      - name: Test paced streaming with the development renderer
+      - name: Build web (production)
+        if: matrix.renderer == 'production'
+        run: npm run build --prefix frontend
+      - name: Test paced streaming
         run: |
-          npm run dev --prefix frontend -- --hostname 127.0.0.1 > /tmp/assistant-streaming-next.log 2>&1 &
+          if [ "${{ matrix.renderer }}" = "development" ]; then
+            npm run dev --prefix frontend -- --hostname 127.0.0.1 > /tmp/assistant-streaming-next.log 2>&1 &
+          else
+            npm run start --prefix frontend -- --hostname 127.0.0.1 > /tmp/assistant-streaming-next.log 2>&1 &
+          fi
           server_pid=$!
           trap 'kill "$server_pid" 2>/dev/null || true' EXIT
           ready=false
@@ -94,11 +111,14 @@ jobs:
             cat /tmp/assistant-streaming-next.log
             exit 1
           fi
-          npx playwright test e2e/assistant-streaming.spec.ts e2e/tabular-chat-lifecycle.spec.ts --project=synthetic --no-deps --retries=0 --trace=retain-on-failure
+          # Development stress keeps zero retries so an intermittent loop
+          # cannot pass on a retry; production uses the config's CI retries.
+          npx playwright test --project=synthetic \
+            ${{ matrix.renderer == 'development' && '--retries=0 --trace=retain-on-failure' || '' }}
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: assistant-streaming-development
+          name: assistant-streaming-${{ matrix.renderer }}
           path: |
             playwright-report/
             test-results/
@@ -120,6 +140,9 @@ jobs:
       # the valid-login specs, so only the base URL is pinned.
       PLAYWRIGHT_BASE_URL: http://localhost:3000
       REACT_STRESS: ${{ matrix.renderer == 'development' && '1' || '0' }}
+      # Parallel Playwright workers, each with its own account (e2e/users.ts).
+      # The runner has 4 vCPUs shared with Postgres, the API and Next.
+      E2E_WORKERS: "3"
       # Exposed to the Playwright process (not just backend/.env) so the LLM-gated
       # specs can skip themselves when no key is present — see e2e/llm.ts. When the
       # secret is set they run and are enforced; when absent they skip, so a keyless
@@ -133,6 +156,38 @@ jobs:
         with:
           node-version: 22
           cache: npm
+
+      # Supabase (Auth + Postgres). This layout ships no supabase/ config dir
+      # (the app targets a hosted Supabase project), so we scaffold one with
+      # `supabase init` purely to boot the CLI's local stack, then load the
+      # repository's own fresh-database schema — exactly what the README tells a
+      # human to run on a new database (backend/schema.sql).
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v3
+        with:
+          # Keep CI reproducible and avoid the GitHub API call needed to resolve
+          # `latest`, which can fail when the shared runner hits its rate limit.
+          version: 2.108.0
+      # Pulling and booting Supabase's containers takes 1.5-5 min, almost all
+      # of it network and Docker work. Start it in the background first so it
+      # overlaps the installs and builds below; "Load fresh schema" waits for it.
+      - name: Start Supabase (background)
+        run: |
+          supabase init --force --with-vscode-settings=false || supabase init --force
+          # E2E uses Auth, Postgres, PostgREST, and Kong only. Document storage
+          # is provided by RustFS below, and no spec reads local email. Excluding
+          # the unused services also avoids Mailpit claiming host port 54324,
+          # which can collide with runner processes before Playwright starts.
+          # Supabase defaults overlap Linux's ephemeral port range. Dedicated
+          # low ports avoid intermittent collisions with runner outbound traffic.
+          sed -i 's/54320/21320/g; s/54321/21321/g; s/54322/21322/g' supabase/config.toml
+          # setup-cli pins GHCR, disabling the CLI's ECR/GHCR/Docker Hub fallback.
+          # Allow the pinned CLI to recover when one public registry is throttled.
+          (
+            env -u SUPABASE_INTERNAL_IMAGE_REGISTRY supabase start \
+              -x studio,imgproxy,mailpit,logflare,vector,realtime,storage-api,edge-runtime,postgres-meta,supavisor
+            echo $? > /tmp/supabase-start.exit
+          ) > /tmp/supabase-start.log 2>&1 &
 
       # Three installs: the root package (Playwright + the e2e tooling), the
       # backend API, and the Next.js web app. Each carries its own lockfile in
@@ -209,31 +264,39 @@ jobs:
           AWS_DEFAULT_REGION=us-east-1 \
             aws --endpoint-url http://localhost:9000 s3 ls s3://mike
 
-      # Supabase (Auth + Postgres). This layout ships no supabase/ config dir
-      # (the app targets a hosted Supabase project), so we scaffold one with
-      # `supabase init` purely to boot the CLI's local stack, then load the
-      # repository's own fresh-database schema — exactly what the README tells a
-      # human to run on a new database (backend/schema.sql).
-      - name: Start local Supabase
-        uses: supabase/setup-cli@v3
-        with:
-          # Keep CI reproducible and avoid the GitHub API call needed to resolve
-          # `latest`, which can fail when the shared runner hits its rate limit.
-          version: 2.108.0
-      - name: Init + start Supabase, load fresh schema
+      # The web client talks to its own /api gateway. Only the Next server
+      # needs the upstream backend origin. Written before the build because
+      # Next inlines NEXT_PUBLIC_* values at build time.
+      - name: Write web env
         run: |
-          supabase init --force --with-vscode-settings=false || supabase init --force
-          # E2E uses Auth, Postgres, PostgREST, and Kong only. Document storage
-          # is provided by RustFS above, and no spec reads local email. Excluding
-          # the unused services also avoids Mailpit claiming host port 54324,
-          # which can collide with runner processes before Playwright starts.
-          # Supabase defaults overlap Linux's ephemeral port range. Dedicated
-          # low ports avoid intermittent collisions with runner outbound traffic.
-          sed -i 's/54320/21320/g; s/54321/21321/g; s/54322/21322/g' supabase/config.toml
-          # setup-cli pins GHCR, disabling the CLI's ECR/GHCR/Docker Hub fallback.
-          # Allow the pinned CLI to recover when one public registry is throttled.
-          env -u SUPABASE_INTERNAL_IMAGE_REGISTRY supabase start \
-            -x studio,imgproxy,mailpit,logflare,vector,realtime,storage-api,edge-runtime,postgres-meta,supavisor
+          {
+            echo "API_BASE_URL=http://localhost:3001"
+            echo "SENTRY_DISABLED=true"
+            echo "NEXT_PUBLIC_SENTRY_DISABLED=true"
+          } > frontend/.env.local
+
+      # Both builds need no database, so they run while Supabase boots.
+      - name: Build backend
+        run: npm run build --prefix backend
+
+      # Keep release-build coverage alongside development diagnostics. The dev
+      # job warms routes below so on-demand compilation does not consume UI
+      # assertion budgets; its error overlay deliberately remains observable.
+      - name: Build web (production)
+        if: matrix.renderer == 'production'
+        run: npm run build --prefix frontend
+
+      - name: Wait for Supabase, load fresh schema
+        run: |
+          for i in $(seq 1 300); do
+            [ -f /tmp/supabase-start.exit ] && break
+            sleep 2
+          done
+          cat /tmp/supabase-start.log
+          if [ "$(cat /tmp/supabase-start.exit 2>/dev/null)" != "0" ]; then
+            echo "::error::supabase start failed or did not finish within 10 minutes"
+            exit 1
+          fi
           DB_URL=$(supabase status -o json | jq -r '.DB_URL')
           # A fresh database runs the current schema exactly once. Historical
           # migrations only upgrade older deployments; replaying them on top of
@@ -294,27 +357,11 @@ jobs:
             # Error reporting is on by default; CI runs must not report.
             echo "SENTRY_DISABLED=true"
           } >> backend/.env
-          # The web client talks to its own /api gateway. Only the Next server
-          # needs the upstream backend origin.
-          {
-            echo "API_BASE_URL=http://localhost:3001"
-            echo "SENTRY_DISABLED=true"
-            echo "NEXT_PUBLIC_SENTRY_DISABLED=true"
-          } > frontend/.env.local
 
       # Production runs this as a release job after migrations and before the
       # backend starts. E2E must exercise the same ordering so defaults exist.
       - name: Sync Mike workflow catalog
-        run: |
-          npm run build --prefix backend
-          npm run sync:workflows --prefix backend
-
-      # Keep release-build coverage alongside development diagnostics. The dev
-      # job warms routes below so on-demand compilation does not consume UI
-      # assertion budgets; its error overlay deliberately remains observable.
-      - name: Build web (production)
-        if: matrix.renderer == 'production'
-        run: npm run build --prefix frontend
+        run: npm run sync:workflows --prefix backend
 
       - name: Start backend API
         run: npm run dev --prefix backend &
@@ -340,8 +387,11 @@ jobs:
 
       # playwright.config.ts sets webServer to undefined when CI=true, so the job
       # is responsible for the servers above; Playwright just drives them.
+      # `chromium` is every full-stack spec (plus its `setup` dependency); the
+      # mocked-API specs run in the `synthetic` job above. E2E_WORKERS (job env)
+      # sets the parallel workers, each signed in as its own user.
       - name: Run Playwright
-        run: npx playwright test
+        run: npx playwright test --project=chromium
 
       # always() (not !cancelled()) so the report still uploads when the job is
       # cancelled by the timeout — that's exactly when you most need the traces.

@@ -31,19 +31,45 @@ matrix:
    on React/observer loop diagnostics. Development overlays remain observable;
    they are not suppressed to make selectors pass. Both jobs use the backend
    API (`:3001`) and web server (`:3000`) with isolated disposable services;
-7. runs `npx playwright test` and uploads the HTML report + traces as an artifact
-   (`playwright-report-production` / `playwright-report-development`) on pass, fail, or timeout.
+7. runs `npx playwright test --project=chromium` on three parallel workers and
+   uploads the HTML report + traces as an artifact (`playwright-report-production` /
+   `playwright-report-development`) on pass, fail, or timeout.
 
-`e2e/auth.setup.ts` bootstraps the shared test user (`e2e@mike.local`) against
-the local Supabase admin API, so no login secret is needed — the credentials
-baked into that file are the single source of truth.
+Supabase boots in the background at the start of the job, so its image pulls
+overlap the installs and both builds; step 3 then only waits for it and loads
+the schema.
 
-The separate **Assistant streaming (development)** job runs
-`e2e/assistant-streaming.spec.ts` and `e2e/tabular-chat-lifecycle.spec.ts` against `next dev`, with synthetic API/SSE
-fixtures and no backend, authentication setup or model-provider key. It catches
-React's development-only passive-update warning on a long conversation. See
-[frontend-testing.md](frontend-testing.md#assistant-streaming-regressions) for
-a standalone local command.
+### Test users and parallel workers
+
+Each Playwright worker signs in as its **own** user, following Playwright's
+[one account per parallel worker](https://playwright.dev/docs/auth#moderate-one-account-per-parallel-worker)
+pattern. Worker 0 is the historical `e2e@mike.local` (or `E2E_EMAIL` /
+`E2E_PASSWORD`); worker *n* is `e2e-wn@mike.local` with the same password
+(`workerAccount()` in `e2e/users.ts`). The worker-scoped fixture in
+`e2e/fixtures.ts` creates the account through the local Supabase admin API,
+signs in once, finishes onboarding and reuses the session for every test in
+that worker. Separate users have separate project, chat and workflow lists and
+separate sessions, so workers can't race on each other's data. Tests inside a
+file still run in order. `e2e/auth.setup.ts` only creates the dedicated logout
+user, whose global sign-out must never revoke a shared session. No login secret
+is needed.
+
+`E2E_WORKERS` sets the worker count (CI sets 3; the default is 1, because
+`next dev` compiles routes on demand). A spec that needs a specific user's
+details takes the `e2eAccount` fixture instead of hardcoding an email.
+
+### Synthetic specs
+
+`e2e/assistant-streaming.spec.ts` and `e2e/tabular-chat-lifecycle.spec.ts` form
+the Playwright **`synthetic`** project. They mock every `/api` call in the
+browser and need no backend, database, account or model-provider key, so CI
+runs them in a separate job that serves only the web app, on four parallel
+workers: **Assistant streaming (production)** on every PR, and **Assistant
+streaming (development)** against `next dev` as a stress job. The streaming
+tests are slow by design (4x CPU throttling and hundreds of SSE chunks, up to
+two minutes each), so keeping them out of the full-stack job is what keeps that
+job short. See [frontend-testing.md](frontend-testing.md#assistant-streaming-regressions)
+for a standalone local command.
 
 Four live-provider cases remain key-gated; the synthetic streaming and history
 stress cases always run. Use the current Playwright summary as the source of
@@ -181,7 +207,8 @@ suite go green a few times (it is environment-sensitive by nature):
    `main`).
 2. Enable **Require status checks to pass before merging**.
 3. Enable **Require branches to be up to date before merging**.
-4. In the checks search box add **`e2e / playwright`** and
+4. In the checks search box add **`e2e / playwright`**,
+   **`e2e / Assistant streaming (production)`** and
    **`Word add-in / Typecheck and Playwright (chromium + webkit)`**. Jobs appear
    in the list after they have run at least once on a PR. Do not require the
    development-stress checks; they only run on PRs labelled `stress` (see
