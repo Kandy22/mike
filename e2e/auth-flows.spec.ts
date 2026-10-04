@@ -6,8 +6,8 @@
  *   4. All protected routes redirect unauthenticated users to /login
  *
  * Tests 1, 2, and 4 run in a fresh browser context (no stored session).
- * Test 3 inherits the authenticated storageState from the Playwright project
- * config (e2e/.auth/user.json), so auth.setup.ts must run first.
+ * Test 3 logs in as the dedicated logout user that auth.setup.ts creates, so
+ * the setup project must run first.
  */
 import { test, expect } from "./fixtures";
 import { completeOnboardingIfRequired } from "./onboarding";
