@@ -4,7 +4,8 @@
  *   2. Projects — create a project, upload a PDF, open the project assistant,
  *      send a message and verify a response begins streaming
  *
- * Prerequisite: auth.setup.ts has already saved the session to e2e/.auth/user.json
+ * Auth: runs signed in as this worker's account (the storageState fixture in
+ * e2e/fixtures.ts).
  */
 import { test, expect } from "./fixtures";
 import { hasLlmKey, LLM_SKIP_REASON } from "./llm";
