@@ -167,38 +167,6 @@ jobs:
           node-version: 22
           cache: npm
 
-      # Supabase (Auth + Postgres). This layout ships no supabase/ config dir
-      # (the app targets a hosted Supabase project), so we scaffold one with
-      # `supabase init` purely to boot the CLI's local stack, then load the
-      # repository's own fresh-database schema — exactly what the README tells a
-      # human to run on a new database (backend/schema.sql).
-      - name: Install Supabase CLI
-        uses: supabase/setup-cli@v3
-        with:
-          # Keep CI reproducible and avoid the GitHub API call needed to resolve
-          # `latest`, which can fail when the shared runner hits its rate limit.
-          version: 2.108.0
-      # Pulling and booting Supabase's containers takes 1.5-5 min, almost all
-      # of it network and Docker work. Start it in the background first so it
-      # overlaps the installs and builds below; "Load fresh schema" waits for it.
-      - name: Start Supabase (background)
-        run: |
-          supabase init --force --with-vscode-settings=false || supabase init --force
-          # E2E uses Auth, Postgres, PostgREST, and Kong only. Document storage
-          # is provided by RustFS below, and no spec reads local email. Excluding
-          # the unused services also avoids Mailpit claiming host port 54324,
-          # which can collide with runner processes before Playwright starts.
-          # Supabase defaults overlap Linux's ephemeral port range. Dedicated
-          # low ports avoid intermittent collisions with runner outbound traffic.
-          sed -i 's/54320/21320/g; s/54321/21321/g; s/54322/21322/g' supabase/config.toml
-          # setup-cli pins GHCR, disabling the CLI's ECR/GHCR/Docker Hub fallback.
-          # Allow the pinned CLI to recover when one public registry is throttled.
-          (
-            env -u SUPABASE_INTERNAL_IMAGE_REGISTRY supabase start \
-              -x studio,imgproxy,mailpit,logflare,vector,realtime,storage-api,edge-runtime,postgres-meta,supavisor
-            echo $? > /tmp/supabase-start.exit
-          ) > /tmp/supabase-start.log 2>&1 &
-
       # Three installs: the root package (Playwright + the e2e tooling), the
       # backend API, and the Next.js web app. Each carries its own lockfile in
       # this repo's backend/ + frontend/ layout (no root workspace).
@@ -274,6 +242,46 @@ jobs:
           AWS_DEFAULT_REGION=us-east-1 \
             aws --endpoint-url http://localhost:9000 s3 ls s3://mike
 
+      # Supabase (Auth + Postgres). This layout ships no supabase/ config dir
+      # (the app targets a hosted Supabase project), so we scaffold one with
+      # `supabase init` purely to boot the CLI's local stack, then load the
+      # repository's own fresh-database schema — exactly what the README tells a
+      # human to run on a new database (backend/schema.sql).
+      # Kept serial on purpose: booting it in the background alongside the
+      # installs and builds saved ~1.7 min but hung at "Starting database..."
+      # past 10 min in 1 of ~6 runs (the serial step never exceeded 2.5 min
+      # across 82 runs), which a merge gate can't afford.
+      - name: Start local Supabase
+        uses: supabase/setup-cli@v3
+        with:
+          # Keep CI reproducible and avoid the GitHub API call needed to resolve
+          # `latest`, which can fail when the shared runner hits its rate limit.
+          version: 2.108.0
+      - name: Init + start Supabase, load fresh schema
+        run: |
+          supabase init --force --with-vscode-settings=false || supabase init --force
+          # E2E uses Auth, Postgres, PostgREST, and Kong only. Document storage
+          # is provided by RustFS above, and no spec reads local email. Excluding
+          # the unused services also avoids Mailpit claiming host port 54324,
+          # which can collide with runner processes before Playwright starts.
+          # Supabase defaults overlap Linux's ephemeral port range. Dedicated
+          # low ports avoid intermittent collisions with runner outbound traffic.
+          sed -i 's/54320/21320/g; s/54321/21321/g; s/54322/21322/g' supabase/config.toml
+          # setup-cli pins GHCR, disabling the CLI's ECR/GHCR/Docker Hub fallback.
+          # Allow the pinned CLI to recover when one public registry is throttled.
+          env -u SUPABASE_INTERNAL_IMAGE_REGISTRY supabase start \
+            -x studio,imgproxy,mailpit,logflare,vector,realtime,storage-api,edge-runtime,postgres-meta,supavisor
+          DB_URL=$(supabase status -o json | jq -r '.DB_URL')
+          # A fresh database runs the current schema exactly once. Historical
+          # migrations only upgrade older deployments; replaying them on top of
+          # schema.sql can overwrite current functions with obsolete definitions.
+          # The schema-drift workflow separately proves that the real upgrade path
+          # (pinned baseline + migrations) converges with this fresh-install path.
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f backend/schema.sql
+          # PostgREST cached its schema when `supabase start` booted it (before
+          # the DDL above). Tell it to reload so the new tables/grants are visible.
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -c "NOTIFY pgrst, 'reload schema';"
+
       # The web client talks to its own /api gateway. Only the Next server
       # needs the upstream backend origin. Written before the build because
       # Next inlines NEXT_PUBLIC_* values at build time.
@@ -285,7 +293,6 @@ jobs:
             echo "NEXT_PUBLIC_SENTRY_DISABLED=true"
           } > frontend/.env.local
 
-      # Both builds need no database, so they run while Supabase boots.
       - name: Build backend
         run: npm run build --prefix backend
 
@@ -295,28 +302,6 @@ jobs:
       - name: Build web (production)
         if: matrix.renderer == 'production'
         run: npm run build --prefix frontend
-
-      - name: Wait for Supabase, load fresh schema
-        run: |
-          for i in $(seq 1 300); do
-            [ -f /tmp/supabase-start.exit ] && break
-            sleep 2
-          done
-          cat /tmp/supabase-start.log
-          if [ "$(cat /tmp/supabase-start.exit 2>/dev/null)" != "0" ]; then
-            echo "::error::supabase start failed or did not finish within 10 minutes"
-            exit 1
-          fi
-          DB_URL=$(supabase status -o json | jq -r '.DB_URL')
-          # A fresh database runs the current schema exactly once. Historical
-          # migrations only upgrade older deployments; replaying them on top of
-          # schema.sql can overwrite current functions with obsolete definitions.
-          # The schema-drift workflow separately proves that the real upgrade path
-          # (pinned baseline + migrations) converges with this fresh-install path.
-          psql "$DB_URL" -v ON_ERROR_STOP=1 -f backend/schema.sql
-          # PostgREST cached its schema when `supabase start` booted it (before
-          # the DDL above). Tell it to reload so the new tables/grants are visible.
-          psql "$DB_URL" -v ON_ERROR_STOP=1 -c "NOTIFY pgrst, 'reload schema';"
 
       - name: Wire env from Supabase
         run: |
@@ -388,14 +373,16 @@ jobs:
 
       # Precompile static routes so cold Turbopack work does not consume UI
       # assertion budgets. Development overlays remain visible to the tests.
-      # Dynamic routes are warmed too: with parallel workers on a throttled
-      # CPU, the first `next dev` compile of /projects/[id] overran a 15 s
-      # navigation wait (stress runs have zero retries). A placeholder id is
-      # enough to compile the route; its status code doesn't matter here.
+      # Onboarding and dynamic routes are warmed too: with parallel workers on
+      # a throttled CPU, a route's first `next dev` compile overran a 15 s
+      # navigation wait (/projects/[id] in one run; /onboarding/profile while
+      # three workers signed in at once in another), and stress runs have zero
+      # retries. A placeholder id is enough to compile a dynamic route; its
+      # status code doesn't matter here.
       - name: Warm development routes
         if: matrix.renderer == 'development'
         run: |
-          for route in login assistant projects tabular-reviews workflows settings; do
+          for route in login onboarding/profile onboarding/practice assistant projects tabular-reviews workflows settings; do
             curl --fail --silent --max-time 120 "http://localhost:3000/$route" > /dev/null
           done
           for route in assistant/chat/warm projects/warm projects/warm/assistant/chat/warm \

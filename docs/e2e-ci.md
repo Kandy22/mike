@@ -35,10 +35,6 @@ matrix:
    uploads the HTML report + traces as an artifact (`playwright-report-production` /
    `playwright-report-development`) on pass, fail, or timeout.
 
-Supabase boots in the background at the start of the job, so its image pulls
-overlap the installs and both builds; step 3 then only waits for it and loads
-the schema.
-
 ### Test users and parallel workers
 
 Each Playwright worker signs in as its **own** user, following Playwright's
