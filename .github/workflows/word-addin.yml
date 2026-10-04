@@ -54,6 +54,7 @@ jobs:
     env:
       WORD_E2E_DEVELOPMENT: "1"
       REACT_STRESS: "1"
+      E2E_WORKERS: "4"
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.0.0
@@ -78,6 +79,10 @@ jobs:
     name: Typecheck and Playwright (chromium + webkit)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # Hermetic specs (per-page Office shim and API mocks) on the runner's
+      # 4 vCPUs; see word-addin/playwright.config.ts.
+      E2E_WORKERS: "4"
     defaults:
       run:
         working-directory: word-addin
