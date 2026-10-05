@@ -15,7 +15,7 @@ selector-breaking UI tweaks — is caught within a day), the `e2e / playwright`
 matrix:
 
 1. installs the root (Playwright), `backend/`, and `frontend/` dependencies;
-2. boots **MinIO** (S3-compatible object storage — several specs upload documents);
+2. boots **RustFS** (S3-compatible object storage — several specs upload documents);
 3. boots **local Supabase** (Auth + Postgres) via the Supabase CLI and loads the
    current fresh-install shape from `backend/schema.sql`. It intentionally does
    not replay historical migrations on top: doing so can replace current

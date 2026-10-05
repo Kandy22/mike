@@ -17,9 +17,8 @@
 # always take the skip path), cost, and how to verify the specs ran are in
 # docs/e2e-ci.md ("Enable the LLM specs").
 #
-# The e2e user (e2e@mike.local) is bootstrapped in-job by e2e/auth.setup.ts against
-# the local Supabase admin API, so no E2E_PASSWORD secret is needed — the defaults
-# baked into auth.setup.ts are the single source of truth.
+# Each worker creates its own account through e2e/fixtures.ts and e2e/users.ts.
+# auth.setup.ts creates only the isolated logout account. No login secret is needed.
 name: e2e
 
 on:
@@ -146,8 +145,7 @@ jobs:
         renderer: ${{ fromJSON((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'stress')) && '["production","development"]' || '["production"]') }}
     runs-on: ubuntu-latest
     env:
-      # Defaults match e2e/auth.setup.ts; overriding the password here would break
-      # the valid-login specs, so only the base URL is pinned.
+      # Login credentials come from e2e/users.ts; pin only the browser origin.
       PLAYWRIGHT_BASE_URL: http://localhost:3000
       REACT_STRESS: ${{ matrix.renderer == 'development' && '1' || '0' }}
       # Parallel Playwright workers, each with its own account (e2e/users.ts).
