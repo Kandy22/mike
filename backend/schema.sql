@@ -61,6 +61,18 @@ create table if not exists public.user_profiles (
   custom_instructions text not null default ''
     constraint user_profiles_custom_instructions_length
     check (char_length(custom_instructions) <= 8000),
+  -- Response style preferences from Settings > Personalisation (formatting
+  -- is the "Headers and Lists" setting); 'balanced' adds nothing to the
+  -- prompt.
+  response_verbosity text not null default 'balanced'
+    constraint user_profiles_response_verbosity_check
+    check (response_verbosity in ('concise', 'balanced', 'detailed')),
+  response_formatting text not null default 'balanced'
+    constraint user_profiles_response_formatting_check
+    check (response_formatting in ('balanced', 'less', 'more')),
+  response_tone text not null default 'balanced'
+    constraint user_profiles_response_tone_check
+    check (response_tone in ('formal', 'balanced', 'plain')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

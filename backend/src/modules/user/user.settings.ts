@@ -3,6 +3,11 @@ import { type UserApiKeys } from "../../lib/llm";
 import { type ReasoningLevel } from "../../lib/llm";
 import { getUserApiKeys as getStoredUserApiKeys } from "./user.apiKeyStore";
 import { loadCustomInstructions } from "./user.customInstructions";
+import {
+    DEFAULT_RESPONSE_STYLE,
+    loadResponseStyle,
+    type ResponseStyle,
+} from "./user.responseStyle";
 import { safeError } from "../../lib/safeError";
 import {
     getAllUserRouterModels,
@@ -34,6 +39,8 @@ export type UserModelSettings = {
         practiceAreas: string[];
         /** Free-form instructions from Settings > Personalisation. */
         customInstructions?: string;
+        /** Response style from Settings > Personalisation. */
+        responseStyle?: ResponseStyle;
     };
 };
 
@@ -42,8 +49,13 @@ export async function getUserModelSettings(
     db?: Db,
 ): Promise<UserModelSettings> {
     const client = db ?? createServerSupabase();
-    const [profileResult, api_keys, routerModels, customInstructions] =
-        await Promise.all([
+    const [
+        profileResult,
+        api_keys,
+        routerModels,
+        customInstructions,
+        responseStyle,
+    ] = await Promise.all([
         client
             .from("user_profiles")
             .select(
@@ -60,6 +72,13 @@ export async function getUserModelSettings(
                 safeError(error),
             );
             return "";
+        }),
+        loadResponseStyle(client, userId).catch((error: unknown) => {
+            console.error(
+                "[user-settings] response style load failed",
+                safeError(error),
+            );
+            return DEFAULT_RESPONSE_STYLE;
         }),
     ]);
     let data = profileResult.data;
@@ -181,6 +200,7 @@ export async function getUserModelSettings(
                   )
                 : [],
             customInstructions,
+            responseStyle,
         },
         api_keys,
     };

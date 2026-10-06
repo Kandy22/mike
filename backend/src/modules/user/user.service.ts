@@ -62,6 +62,13 @@ export {
 } from "./user.customInstructions";
 
 export {
+    getResponseStyle,
+    saveResponseStyle,
+    validateResponseStylePayload,
+    type ResponseStyle,
+} from "./user.responseStyle";
+
+export {
     getApiKeyStatus,
     saveApiKey,
     type SaveApiKeyResult,
