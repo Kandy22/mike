@@ -19,10 +19,12 @@ const BASE_URL = `http://localhost:${PORT}`;
 
 export default defineConfig({
   testDir: "./e2e",
-  // Single shared in-page Office shim + recorded Word calls per page; keep it
-  // strictly serial and deterministic, matching the repo's Playwright style.
+  // The Office shim, recorded Word calls and every backend route are installed
+  // per page (e2e/support), so files share no state and CI spreads them over
+  // parallel workers (E2E_WORKERS in .github/workflows/word-addin.yml). Tests
+  // inside a file still run in order. Local runs stay serial by default.
   fullyParallel: false,
-  workers: 1,
+  workers: process.env.E2E_WORKERS ? Number(process.env.E2E_WORKERS) : 1,
   forbidOnly: !!process.env.CI,
   // A timing-dependent stress failure must not become green on retry.
   retries: process.env.REACT_STRESS === "1" ? 0 : process.env.CI ? 2 : 0,
