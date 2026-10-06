@@ -5,9 +5,8 @@
  *   3. Create a folder inside a project
  *   4. File upload type validation (wrong type rejected)
  *
- * Prerequisite: auth.setup.ts has already saved the session to e2e/.auth/user.json.
- * All tests run with the authenticated storageState configured in playwright.config.ts —
- * no test.use override is needed here.
+ * Auth: every test runs signed in as this worker's account (the storageState
+ * fixture in e2e/fixtures.ts) — no test.use override is needed here.
  *
  * Each test creates its own uniquely-named project so tests are fully isolated.
  */
