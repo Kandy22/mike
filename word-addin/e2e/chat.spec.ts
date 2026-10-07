@@ -1519,7 +1519,10 @@ for (const model of [
     await addin.expectAuthedShell();
 
     await page.getByRole("button", { name: "Choose model" }).click();
-    await page.getByRole("menuitem", { name: model.group, exact: true }).click();
+    const group = page.getByRole("menuitem", { name: model.group, exact: true });
+    if ((await group.getAttribute("aria-expanded")) !== "true") {
+      await group.click();
+    }
     await page.getByRole("menuitem", { name: model.label, exact: true }).click();
     await page.getByPlaceholder("How can I help?").fill("Hello");
     const requestPromise = page.waitForRequest("**/word-chat");
