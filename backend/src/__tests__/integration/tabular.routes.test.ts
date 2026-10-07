@@ -90,7 +90,7 @@ function resultForTable(table: string): QueryResult {
     ) {
         return {
             ...resolved,
-            data: { ...resolved.data, model: "claude-sonnet-5" },
+            data: { ...resolved.data, model: "claude-sonnet-5-5" },
         };
     }
     return resolved;
@@ -251,8 +251,8 @@ describe("tabular.routes", () => {
         );
         getUserModelSettings.mockResolvedValue({
             title_model: "claude-haiku-4-5",
-            tabular_model: "claude-sonnet-5",
-            last_selected_chat_model: "claude-sonnet-5",
+            tabular_model: "claude-sonnet-5-5",
+            last_selected_chat_model: "claude-sonnet-5-5",
             last_selected_reasoning_level: "high",
             legal_research_us: false,
             api_keys: { claude: "sk-test" },
@@ -324,7 +324,7 @@ describe("tabular.routes", () => {
                     title: "Firm review",
                     document_ids: [],
                     columns_config: [],
-                    model: "claude-sonnet-5",
+                    model: "claude-sonnet-5-5",
                     org_id: "org-1",
                 });
 
@@ -379,7 +379,7 @@ describe("tabular.routes", () => {
                     title: "Gamma",
                     document_ids: ["d1", "d2"],
                     columns_config: [{ index: 0, name: "Col", prompt: "p" }],
-                    model: "claude-sonnet-5",
+                    model: "claude-sonnet-5-5",
                 });
 
             expect(res.status).toBe(201);
@@ -477,7 +477,7 @@ describe("tabular.routes", () => {
                     document_ids: ["d1", "d2", "d3"],
                     document_grouping: "folder",
                     columns_config: [{ index: 0, name: "Col", prompt: "p" }],
-                    model: "claude-sonnet-5",
+                    model: "claude-sonnet-5-5",
                 });
 
             expect(res.status).toBe(201);
@@ -597,7 +597,7 @@ describe("tabular.routes", () => {
                     document_ids: ["d1", "d2"],
                     document_grouping: "folder",
                     columns_config: [{ index: 0, name: "Col", prompt: "p" }],
-                    model: "claude-sonnet-5",
+                    model: "claude-sonnet-5-5",
                 });
 
             expect(res.status).toBe(201);
@@ -644,7 +644,7 @@ describe("tabular.routes", () => {
                     project_id: "p-nope",
                     document_ids: [],
                     columns_config: [],
-                    model: "claude-sonnet-5",
+                    model: "claude-sonnet-5-5",
                 });
 
             expect(res.status).toBe(404);
@@ -663,7 +663,7 @@ describe("tabular.routes", () => {
                 .send({
                     document_ids: [],
                     columns_config: [],
-                    model: "claude-sonnet-5",
+                    model: "claude-sonnet-5-5",
                 });
 
             expect(res.status).toBe(500);
@@ -1423,7 +1423,7 @@ describe("tabular.routes", () => {
             };
             getUserModelSettings.mockResolvedValue({
                 title_model: "claude-haiku-4-5",
-                tabular_model: "claude-sonnet-5",
+                tabular_model: "claude-sonnet-5-5",
                 legal_research_us: false,
                 api_keys: {},
             });
@@ -1638,7 +1638,7 @@ describe("tabular.routes", () => {
             supabaseState.tables.tabular_cells = { data: [], error: null };
             getUserModelSettings.mockResolvedValue({
                 title_model: "claude-haiku-4-5",
-                tabular_model: "claude-sonnet-5",
+                tabular_model: "claude-sonnet-5-5",
                 legal_research_us: false,
                 api_keys: {},
             });
@@ -2045,7 +2045,7 @@ describe("tabular.routes", () => {
             const args = await held.started;
             getUserModelSettings.mockResolvedValue({
                 title_model: "claude-haiku-4-5",
-                tabular_model: "claude-sonnet-5",
+                tabular_model: "claude-sonnet-5-5",
                 legal_research_us: false,
                 api_keys: {},
             });
@@ -2147,7 +2147,7 @@ describe("tabular.routes", () => {
             supabaseState.tables.tabular_cells = { data: [], error: null };
             getUserModelSettings.mockResolvedValue({
                 title_model: "claude-haiku-4-5",
-                tabular_model: "claude-sonnet-5",
+                tabular_model: "claude-sonnet-5-5",
                 legal_research_us: false,
                 api_keys: {},
             });
@@ -2157,7 +2157,7 @@ describe("tabular.routes", () => {
                 .set(...AUTH)
                 .send({
                     messages: [{ role: "user", content: "hello" }],
-                    model: "claude-sonnet-5",
+                    model: "claude-sonnet-5-5",
                 });
 
             expect(res.status).toBe(422);
@@ -2186,7 +2186,7 @@ describe("tabular.routes", () => {
                     title: "Existing title",
                     review_id: "r1",
                     user_id: "u1",
-                    model: "claude-sonnet-5",
+                    model: "claude-sonnet-5-5",
                     reasoning_level: "high",
                 },
                 error: null,
@@ -2214,7 +2214,7 @@ describe("tabular.routes", () => {
                 .set(...AUTH)
                 .send({
                     messages: [{ role: "user", content: "Summarise" }],
-                    model: "claude-sonnet-5",
+                    model: "claude-sonnet-5-5",
                 });
 
             expect(res.status).toBe(200);
@@ -2291,7 +2291,7 @@ describe("tabular.routes", () => {
                     title: "Existing title",
                     review_id: "r1",
                     user_id: "u1",
-                    model: "claude-sonnet-5",
+                    model: "claude-sonnet-5-5",
                     reasoning_level: "high",
                 },
                 error: null,
@@ -2316,7 +2316,7 @@ describe("tabular.routes", () => {
                 .set(...AUTH)
                 .send({
                     messages: [{ role: "user", content: "Summarise" }],
-                    model: "claude-sonnet-5",
+                    model: "claude-sonnet-5-5",
                 });
 
             expect(res.status).toBe(200);
@@ -2349,7 +2349,7 @@ describe("tabular.routes", () => {
             title: "Existing title",
             review_id: "r1",
             user_id: "u1",
-            model: "claude-sonnet-5",
+            model: "claude-sonnet-5-5",
             reasoning_level: "high",
         };
 
@@ -2386,7 +2386,7 @@ describe("tabular.routes", () => {
                 .send({
                     messages: [{ role: "user", content: "Summarise" }],
                     chat_id: "review-chat-1",
-                    model: "claude-sonnet-5",
+                    model: "claude-sonnet-5-5",
                 });
 
         /** A generation the test releases by hand. */
@@ -2716,7 +2716,7 @@ describe("tabular.routes", () => {
                 data: {
                     id: "chat-1",
                     title: "Chat",
-                    model: "claude-sonnet-5",
+                    model: "claude-sonnet-5-5",
                     reasoning_level: "high",
                     review_id: "r1",
                     user_id: "u1",
@@ -2725,8 +2725,8 @@ describe("tabular.routes", () => {
             };
             getUserModelSettings.mockResolvedValue({
                 title_model: "claude-haiku-4-5",
-                tabular_model: "claude-sonnet-5",
-                last_selected_chat_model: "claude-sonnet-5",
+                tabular_model: "claude-sonnet-5-5",
+                last_selected_chat_model: "claude-sonnet-5-5",
                 last_selected_reasoning_level: "high",
                 legal_research_us: false,
                 api_keys: { openai: "sk-test" },
@@ -2735,13 +2735,13 @@ describe("tabular.routes", () => {
             const res = await request(app)
                 .patch("/tabular-review/r1/chats/chat-1")
                 .set(...AUTH)
-                .send({ model: "gpt-5.6-sol", reasoningLevel: "low" });
+                .send({ model: "gpt-6-astra", reasoningLevel: "low" });
 
             expect(res.status).toBe(200);
             expect(supabaseState.updates).toContainEqual({
                 table: "tabular_review_chats",
                 payload: expect.objectContaining({
-                    model: "gpt-5.6-sol",
+                    model: "gpt-6-astra",
                     reasoning_level: "low",
                 }),
             });
