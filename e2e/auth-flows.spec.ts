@@ -163,6 +163,9 @@ test.describe("logout (isolated user)", () => {
     await accountSettingsItem.click();
 
     await expect(page).toHaveURL(/\/settings/, { timeout: 10_000 });
+    // Wait for Radix to finish closing the selected menu before reopening it.
+    await expect(page.getByRole("menu")).toHaveCount(0);
+    await expect(userMenuButton).toHaveAttribute("aria-expanded", "false");
 
     /* Sign out now lives in the account dropdown rather than the Settings
        page. Reopen the same sidebar menu after navigation and exercise the
