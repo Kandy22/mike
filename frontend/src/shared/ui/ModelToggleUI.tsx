@@ -8,13 +8,15 @@ import {
   LoaderCircle,
   Settings2,
 } from "lucide-react";
+import { twMerge } from "tailwind-merge";
 import {
+  DROPDOWN_ROWS_CLASS,
   Dropdown,
   DropdownContent,
   DropdownItem,
   DropdownSeparator,
   DropdownTrigger,
-} from "./DropdownUI";
+} from "./dropdown";
 import {
   LIQUID_GLASS_FLOAT_CLASS,
   LIQUID_GLASS_HOVER_CLASS,
@@ -121,6 +123,8 @@ export interface ModelToggleUIProps {
   /** `default` matches the toolbar's other buttons; `muted` is the lighter chat-composer look. */
   tone?: "muted" | "default";
   modalInput?: boolean;
+  /** Extra classes for the compact trigger button, for a host row's sizing. */
+  triggerClassName?: string;
   emptyLabel?: string;
   onEmptyClick?: () => void;
   reasoningLevel?: ReasoningLevel;
@@ -145,6 +149,7 @@ export function ModelToggleUI({
   compact = false,
   tone = "muted",
   modalInput = false,
+  triggerClassName,
   emptyLabel = "No Models",
   onEmptyClick,
   reasoningLevel,
@@ -193,7 +198,10 @@ export function ModelToggleUI({
         className={
           modalInput
             ? `flex h-10 w-full items-center rounded-xl px-3 text-sm text-gray-400 ${LIQUID_GLASS_SUBTLE_CLASS} ${LIQUID_GLASS_HOVER_CLASS} backdrop-blur-xl transition-colors enabled:cursor-pointer enabled:hover:text-gray-700 disabled:cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-2`
-            : "flex h-8 shrink-0 items-center rounded-lg px-2 text-sm text-gray-400 transition-colors enabled:cursor-pointer enabled:hover:text-gray-700 disabled:cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-2"
+            : twMerge(
+                "flex h-8 shrink-0 items-center rounded-lg px-2 text-sm text-gray-400 transition-colors enabled:cursor-pointer enabled:hover:text-gray-700 disabled:cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-2",
+                triggerClassName,
+              )
         }
       >
         <span className="max-w-[200px] truncate">{emptyLabel}</span>
@@ -220,7 +228,10 @@ export function ModelToggleUI({
           className={
             modalInput
               ? `flex h-10 w-full items-center justify-between gap-2 rounded-xl px-3 text-sm text-gray-700 ${LIQUID_GLASS_SUBTLE_CLASS} ${LIQUID_GLASS_HOVER_CLASS} backdrop-blur-xl transition-colors enabled:cursor-pointer disabled:cursor-default disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-2 ${open ? LIQUID_GLASS_SELECTED_CLASS : ""}`
-              : `flex h-8 shrink-0 items-center rounded-lg text-sm ${tone === "default" ? "text-gray-700 enabled:hover:text-gray-900 disabled:hover:text-gray-700" : "text-gray-400 enabled:hover:text-gray-700 disabled:hover:text-gray-400"} transition-colors enabled:cursor-pointer disabled:cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-2 ${compact ? "w-8 justify-center px-0" : "gap-1.5 px-2"} ${open ? "text-gray-700" : ""}`
+              : twMerge(
+                  `flex h-8 shrink-0 items-center rounded-lg text-sm ${tone === "default" ? "text-gray-700 enabled:hover:text-gray-900 disabled:hover:text-gray-700" : "text-gray-400 enabled:hover:text-gray-700 disabled:hover:text-gray-400"} transition-colors enabled:cursor-pointer disabled:cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-2 ${compact ? "w-8 justify-center px-0" : "gap-1.5 px-2"} ${open ? "text-gray-700" : ""}`,
+                  triggerClassName,
+                )
           }
         >
           {compact ? (
@@ -251,7 +262,9 @@ export function ModelToggleUI({
         sideOffset={modalInput ? 4 : 8}
         className={`flex max-h-[min(320px,60vh)] flex-col overflow-hidden rounded-2xl text-gray-700 ${modalInput ? "w-[var(--radix-dropdown-menu-trigger-width)]" : "w-56"}`}
       >
-        <div className="-mr-1.5 min-h-0 flex-1 space-y-1 overflow-y-auto pr-1.5">
+        <div
+          className={`-mr-1.5 min-h-0 flex-1 overflow-y-auto pr-1.5 ${DROPDOWN_ROWS_CLASS}`}
+        >
           {availableGroups.map(({ group, items }) => {
             const expanded = expandedGroup === group;
             return (

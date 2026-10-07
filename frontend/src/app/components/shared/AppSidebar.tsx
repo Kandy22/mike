@@ -22,6 +22,13 @@ import Link from "next/link";
 import { MikeIcon } from "@/app/components/chat/mike-icon";
 import { SidebarChatItem } from "@/app/components/shared/SidebarChatItem";
 import {
+    Dropdown,
+    DropdownContent,
+    DropdownItem,
+    DropdownTrigger,
+} from "@/shared/ui/dropdown";
+import { SidebarProjectItem } from "@/app/components/shared/SidebarProjectItem";
+import {
     ChatSkeuoIcon,
     IdeSkeuoIcon,
     FolderSkeuoIcon,
@@ -33,7 +40,6 @@ import {
     SignOutSkeuoIcon,
 } from "@/app/components/shared/AppSidebarSkeuoIcons";
 import { HistorySkeuoIcon } from "@/app/components/shared/HistorySkeuoIcon";
-import { ProjectSvgIcon } from "@/app/components/shared/FolderSvgIcon";
 import { listProjectSummaries } from "@/app/lib/mikeApi";
 import type { Project } from "@/app/components/shared/types";
 import { cn } from "@/app/lib/utils";
@@ -60,6 +66,8 @@ const NAV_ITEMS = [
 
 const RECENT_PROJECT_PAGE_SIZE = 10;
 const RECENT_PROJECT_LIST_HEIGHT_CLASS = "h-44";
+// Room for an expanded project's recent chats and reviews.
+const RECENT_PROJECT_LIST_EXPANDED_HEIGHT_CLASS = "h-64";
 const recentProjectsCache = new Map<
     string,
     { projects: Project[]; hasMore: boolean }
@@ -102,10 +110,45 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
         statuses: assistantHistoryStatuses,
         clearStatus: clearAssistantHistoryStatus,
     } = useAssistantHistoryStatuses({ activeChatId: routeChatId, chatIds });
+    // Fade the contents in whenever the sidebar opens, from its own toggle or
+    // from a page calling setSidebarOpen, but not when it is already open on
+    // first render.
     const [shouldAnimate, setShouldAnimate] = useState(false);
+    const [wasOpen, setWasOpen] = useState(isOpen);
+    if (isOpen !== wasOpen) {
+        setWasOpen(isOpen);
+        if (isOpen) setShouldAnimate(true);
+    }
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const [projectsCollapsed, setProjectsCollapsed] = useState(false);
     const [historyCollapsed, setHistoryCollapsed] = useState(false);
+    const activeProjectId = pathname.match(/^\/projects\/([^/]+)/)?.[1] ?? null;
+    const [expandedProjectIds, setExpandedProjectIds] = useState<
+        ReadonlySet<string>
+    >(() => new Set(activeProjectId ? [activeProjectId] : []));
+    // Opening a project expands its recent items. It never collapses one the
+    // user opened, so navigating away keeps their choice.
+    const [lastActiveProjectId, setLastActiveProjectId] =
+        useState(activeProjectId);
+    if (activeProjectId !== lastActiveProjectId) {
+        setLastActiveProjectId(activeProjectId);
+        if (activeProjectId && !expandedProjectIds.has(activeProjectId)) {
+            setExpandedProjectIds(
+                (current) => new Set([...current, activeProjectId]),
+            );
+        }
+    }
+    const setProjectExpanded = useCallback(
+        (projectId: string, expanded: boolean) => {
+            setExpandedProjectIds((current) => {
+                const next = new Set(current);
+                if (expanded) next.add(projectId);
+                else next.delete(projectId);
+                return next;
+            });
+        },
+        [],
+    );
     const userId = user?.id ?? null;
     const [recentProjects, setRecentProjects] = useState<Project[] | null>(
         null,
@@ -223,18 +266,8 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
     );
 
     const handleToggle = () => {
-        if (isOpen) setShouldAnimate(true);
         onToggle();
     };
-
-    useEffect(() => {
-        const handleClickOutside = () => setIsDropdownOpen(false);
-        if (isDropdownOpen) {
-            document.addEventListener("click", handleClickOutside);
-            return () =>
-                document.removeEventListener("click", handleClickOutside);
-        }
-    }, [isDropdownOpen]);
 
     useEffect(() => {
         setCurrentChatId(routeChatId);
@@ -255,6 +288,11 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
         if (!profile) return "";
         return profile.tier || "Free";
     };
+
+    const anyRecentProjectExpanded =
+        displayedRecentProjects?.some((project) =>
+            expandedProjectIds.has(project.id),
+        ) ?? false;
 
     if (!user) return null;
 
@@ -371,7 +409,7 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                         <div>
                             <button
                                 onClick={() => setProjectsCollapsed((v) => !v)}
-                                className={`mb-2 flex w-full items-center justify-between px-3.5 text-xs font-semibold text-gray-500 transition-colors hover:text-gray-700 ${
+                                className={`mb-2 flex w-full items-center justify-between rounded-md px-3.5 text-xs font-semibold text-gray-500 transition-colors hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500/40 ${
                                     shouldAnimate ? "sidebar-fade-in" : ""
                                 }`}
                             >
@@ -385,8 +423,10 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                             {!projectsCollapsed && (
                                 <div
                                     className={cn(
-                                        RECENT_PROJECT_LIST_HEIGHT_CLASS,
-                                        "overflow-y-auto",
+                                        anyRecentProjectExpanded
+                                            ? RECENT_PROJECT_LIST_EXPANDED_HEIGHT_CLASS
+                                            : RECENT_PROJECT_LIST_HEIGHT_CLASS,
+                                        "overflow-y-auto transition-[height] duration-200 motion-reduce:transition-none",
                                     )}
                                     onScroll={handleRecentProjectsScroll}
                                 >
@@ -395,8 +435,11 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                                             {[50, 65, 45].map((w, i) => (
                                                 <div
                                                     key={i}
-                                                    className="flex h-8 items-center rounded-md px-3"
+                                                    className="flex h-8 items-center gap-3 rounded-md px-2"
                                                 >
+                                                    <div className="flex h-4 w-4 shrink-0 items-center justify-center">
+                                                        <div className="h-3.5 w-3.5 rounded bg-gray-200 animate-pulse" />
+                                                    </div>
                                                     <div
                                                         className="h-3 bg-gray-200 rounded animate-pulse"
                                                         style={{
@@ -425,39 +468,29 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                                             }`}
                                         >
                                             {displayedRecentProjects.map(
-                                                (project) => {
-                                                    const isActive =
-                                                        pathname ===
-                                                            `/projects/${project.id}` ||
-                                                        pathname.startsWith(
-                                                            `/projects/${project.id}/`,
-                                                        );
-                                                    return (
-                                                        <button
-                                                            key={project.id}
-                                                            onClick={() =>
-                                                                router.push(
-                                                                    `/projects/${project.id}`,
-                                                                )
-                                                            }
-                                                            title={project.name}
-                                                            className={cn(
-                                                                "flex h-8 w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs transition-colors",
-                                                                isActive
-                                                                    ? `${LIQUID_GLASS_SELECTED_CLASS} text-gray-900`
-                                                                    : `text-gray-700 ${LIQUID_GLASS_HOVER_CLASS}`,
-                                                            )}
-                                                        >
-                                                            <ProjectSvgIcon
-                                                                open={isActive}
-                                                                className="h-3.5 w-3.5 shrink-0"
-                                                            />
-                                                            <span className="min-w-0 flex-1 truncate">
-                                                                {project.name}
-                                                            </span>
-                                                        </button>
-                                                    );
-                                                },
+                                                (project) => (
+                                                    <SidebarProjectItem
+                                                        key={project.id}
+                                                        project={project}
+                                                        pathname={pathname}
+                                                        expanded={expandedProjectIds.has(
+                                                            project.id,
+                                                        )}
+                                                        onExpandedChange={(
+                                                            expanded,
+                                                        ) =>
+                                                            setProjectExpanded(
+                                                                project.id,
+                                                                expanded,
+                                                            )
+                                                        }
+                                                        onOpenProject={() =>
+                                                            router.push(
+                                                                `/projects/${project.id}`,
+                                                            )
+                                                        }
+                                                    />
+                                                ),
                                             )}
                                             {loadingMoreRecentProjects && (
                                                 <div className="flex h-8 items-center justify-center">
@@ -479,7 +512,7 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                         >
                             <button
                                 onClick={() => setHistoryCollapsed((v) => !v)}
-                                className={`mb-2 flex w-full items-center justify-between px-3.5 text-xs font-semibold text-gray-500 transition-colors hover:text-gray-700 ${
+                                className={`mb-2 flex w-full items-center justify-between rounded-md px-3.5 text-xs font-semibold text-gray-500 transition-colors hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500/40 ${
                                     shouldAnimate ? "sidebar-fade-in" : ""
                                 }`}
                             >
@@ -502,9 +535,11 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                                         {[40, 60, 50, 70, 45].map((w, i) => (
                                             <div
                                                 key={i}
-                                                className="flex h-8 items-center rounded-md px-2.5"
+                                                className="flex h-8 items-center gap-3 rounded-md px-2"
                                             >
-                                                <div className="mr-2 h-3.5 w-3.5 shrink-0 rounded bg-gray-200 animate-pulse" />
+                                                <div className="flex h-4 w-4 shrink-0 items-center justify-center">
+                                                    <div className="h-3.5 w-3.5 rounded bg-gray-200 animate-pulse" />
+                                                </div>
                                                 <div
                                                     className="h-3 bg-gray-200 rounded animate-pulse"
                                                     style={{ width: `${w}%` }}
@@ -578,15 +613,14 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                 {/* User Profile */}
                 <div className="mt-auto p-1">
                     {user && (
-                        <div className="relative">
+                        <Dropdown
+                            open={isDropdownOpen}
+                            onOpenChange={setIsDropdownOpen}
+                        >
+                          <DropdownTrigger asChild>
                             <button
                                 type="button"
-                                aria-expanded={isDropdownOpen}
-                                aria-controls="account-dropdown"
                                 aria-label="Account menu"
-                                onClick={() =>
-                                    setIsDropdownOpen(!isDropdownOpen)
-                                }
                                 className={cn(
                                     "flex h-12 w-full shrink-0 items-center rounded-xl px-1.5 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-2",
                                     !isOpen ? "hidden md:flex" : "",
@@ -621,81 +655,54 @@ export function AppSidebar({ isOpen, onToggle }: AppSidebarProps) {
                                     </div>
                                 )}
                             </button>
-
-                            {isDropdownOpen && (
-                                <div
-                                    id="account-dropdown"
-                                    className={cn(
-                                        "absolute bottom-full left-0 z-50 mb-1 p-1 whitespace-nowrap",
-                                        isOpen ? "right-0" : "w-56",
-                                        `${LIQUID_GLASS_FLOAT_CLASS} rounded-xl backdrop-blur-xl`,
-                                    )}
-                                >
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            router.push("/history");
-                                            setIsDropdownOpen(false);
-                                        }}
-                                        className={cn(
-                                            "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-gray-700",
-                                            LIQUID_GLASS_HOVER_CLASS,
-                                            pathname === "/history" &&
-                                                LIQUID_GLASS_SELECTED_CLASS,
-                                        )}
-                                    >
-                                        <HistorySkeuoIcon className="h-4 w-4" />
-                                        History
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            router.push("/settings");
-                                            setIsDropdownOpen(false);
-                                        }}
-                                        className={cn(
-                                            "w-full px-2 py-2 text-left text-sm text-gray-700 flex items-center gap-2 rounded-md",
-                                            LIQUID_GLASS_HOVER_CLASS,
-                                        )}
-                                    >
-                                        <SettingsSkeuoIcon className="h-4 w-4" />
-                                        Settings
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            router.push("/organizations");
-                                            setIsDropdownOpen(false);
-                                        }}
-                                        className={cn(
-                                            "w-full px-2 py-2 text-left text-sm text-gray-700 flex items-center gap-2 rounded-md",
-                                            LIQUID_GLASS_HOVER_CLASS,
-                                        )}
-                                    >
-                                        <OrganizationSkeuoIcon className="h-4 w-4" />
-                                        Organizations
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setIsDropdownOpen(false);
-                                            void signOut()
-                                                .then(() => router.push("/"))
-                                                .catch(() =>
-                                                    setSignOutWarningOpen(true),
-                                                );
-                                        }}
-                                        className={cn(
-                                            "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-gray-700",
-                                            LIQUID_GLASS_HOVER_CLASS,
-                                        )}
-                                    >
-                                        <SignOutSkeuoIcon className="h-4 w-4" />
-                                        Sign out
-                                    </button>
-                                </div>
-                            )}
-                        </div>
+                          </DropdownTrigger>
+                          <DropdownContent
+                              side="top"
+                              align="start"
+                              className={cn(
+                                  "whitespace-nowrap",
+                                  isOpen
+                                      ? "w-[var(--radix-dropdown-menu-trigger-width)]"
+                                      : "w-56",
+                              )}
+                          >
+                              <DropdownItem
+                                  selected={pathname === "/history"}
+                                  onSelect={() => router.push("/history")}
+                                  className="gap-2 px-2 py-2 text-sm text-gray-700"
+                              >
+                                  <HistorySkeuoIcon className="h-4 w-4" />
+                                  History
+                              </DropdownItem>
+                              <DropdownItem
+                                  onSelect={() => router.push("/settings")}
+                                  className="gap-2 px-2 py-2 text-sm text-gray-700"
+                              >
+                                  <SettingsSkeuoIcon className="h-4 w-4" />
+                                  Settings
+                              </DropdownItem>
+                              <DropdownItem
+                                  onSelect={() => router.push("/organizations")}
+                                  className="gap-2 px-2 py-2 text-sm text-gray-700"
+                              >
+                                  <OrganizationSkeuoIcon className="h-4 w-4" />
+                                  Organizations
+                              </DropdownItem>
+                              <DropdownItem
+                                  onSelect={() => {
+                                      void signOut()
+                                          .then(() => router.push("/"))
+                                          .catch(() =>
+                                              setSignOutWarningOpen(true),
+                                          );
+                                  }}
+                                  className="gap-2 px-2 py-2 text-sm text-gray-700"
+                              >
+                                  <SignOutSkeuoIcon className="h-4 w-4" />
+                                  Sign out
+                              </DropdownItem>
+                          </DropdownContent>
+                        </Dropdown>
                     )}
                 </div>
             </div>

@@ -5,8 +5,8 @@
  *   3. Delete a chat from sidebar — verifies delete API and sidebar removal
  *   4. Project assistant: create a new chat and submit a question
  *
- * Auth: inherits storageState from playwright.config.ts ("e2e/.auth/user.json")
- * Test user: e2e@mike.local / E2eTestPass1!
+ * Auth: runs signed in as this worker's account (the storageState fixture in
+ * e2e/fixtures.ts; e2e@mike.local on worker 0).
  */
 import { test, expect, type Page } from "./fixtures";
 import { hasLlmKey, LLM_SKIP_REASON } from "./llm";
@@ -133,27 +133,24 @@ test("rename chat: sidebar rename interaction updates the title", async ({ page 
     await activeItem.hover();
 
     // ── Step 5: click the MoreHorizontal trigger (three-dot menu) ────────────────
-    // SidebarChatItem.tsx lines 104-115: DropdownMenuTrigger wraps a <button> with
+    // SidebarChatItem.tsx: DropdownTrigger wraps a <button> with
     // the MoreHorizontal icon.  In the non-renaming state the two buttons inside the
     // item are [0] chat-title button and [1] the trigger; .last() picks the trigger.
     const triggerBtn = activeItem.locator("button").last();
     await triggerBtn.click();
 
-    // ── Step 6: click "Rename" in the Radix DropdownMenuContent ─────────────────
-    // SidebarChatItem.tsx lines 117-129: DropdownMenuItem with Pencil icon + "Rename"
+    // ── Step 6: click "Rename" in the dropdown ──────────────────────────────────
+    // SidebarChatItem.tsx: DropdownItem with Pencil icon + "Rename"
     const renameItem = page.getByRole("menuitem", { name: "Rename" });
     await expect(renameItem).toBeVisible({ timeout: 5_000 });
     await renameItem.click();
 
-    // ── Step 7: type the new title in the inline input ───────────────────────────
-    // SidebarChatItem.tsx lines 56-68: isRenaming state shows an <input type="text">
-    // that is focused automatically (editInputRef.current?.focus() in useEffect).
-    // There is no data-testid; scope to the item container to avoid ambiguity.
-    const renameInput = activeItem.locator("input[type='text']");
+    // ── Step 7: type the new title in the rename modal ───────────────────────────
+    // "Rename" opens the shared RenameModal (breadcrumbs Assistant > Rename
+    // Chat) with a "Chat title" field; submitting the form saves.
+    const renameInput = page.getByLabel("Chat title");
     await expect(renameInput).toBeVisible({ timeout: 5_000 });
     await renameInput.fill(newTitle);
-
-    // SidebarChatItem.tsx line 63: Enter key calls handleRenameSave()
     await renameInput.press("Enter");
 
     // ── Step 8: assert the new title appears in the sidebar ──────────────────────
@@ -256,7 +253,7 @@ test("delete chat: sidebar delete action removes the chat from history", async (
 
     // ── Step 5-7: delete that specific chat ──────────────────────────────────────
     // deleteChatFn (ChatHistoryContext.tsx:157-168) optimistically removes the
-    // row. SidebarChatItem.tsx:132-144: the "Delete" DropdownMenuItem calls
+    // row. SidebarChatItem.tsx:132-144: the "Delete" DropdownItem calls
     // deleteChat(chat.id) directly — no confirmation dialog.
     await targetRow.hover();
     await targetRow.locator("button").last().click();

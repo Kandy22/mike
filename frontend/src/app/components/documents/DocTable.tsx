@@ -12,7 +12,6 @@ import {
     useRef,
     useState,
 } from "react";
-import { createPortal } from "react-dom";
 import { Loader2, AlertCircle, ChevronDown, ChevronRight } from "lucide-react";
 import {
     UploadBatchError,
@@ -43,9 +42,10 @@ import {
     closeRowActionMenus,
     RowActionMenuItems,
     RowActions,
-    type RowActionMenuSurfaceProps,
+    ROW_ACTION_MENU_CLASS,
 } from "@/app/components/shared/RowActions";
 import { SubfolderSvgIcon } from "@/app/components/shared/FolderSvgIcon";
+import { DropdownAtPoint } from "@/shared/ui/dropdown";
 import { useAuth } from "@/app/contexts/AuthContext";
 import {
     creatorScopedAllowed,
@@ -737,7 +737,6 @@ export function DocTable({
     const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
     const [renameFolderValue, setRenameFolderValue] = useState("");
     const [contextMenu, setContextMenu] = useState<ProjectContextMenu | null>(null);
-    const contextMenuRef = useRef<HTMLDivElement>(null);
     const newFolderInputRef = useRef<HTMLDivElement | null>(null);
     const versionUploadInputRef = useRef<HTMLInputElement>(null);
     const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
@@ -916,16 +915,6 @@ export function DocTable({
     useEffect(() => {
         if (search.trim() || serverQueryActive) navigateToFolderRoot();
     }, [navigateToFolderRoot, search, serverQueryActive]);
-
-    // Close context menu on outside click
-    useEffect(() => {
-        if (!contextMenu) return;
-        function handle(e: MouseEvent) {
-            if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) setContextMenu(null);
-        }
-        document.addEventListener("mousedown", handle);
-        return () => document.removeEventListener("mousedown", handle);
-    }, [contextMenu]);
 
     // Clear all drag state when any drag operation ends
     useEffect(() => {
@@ -4498,20 +4487,20 @@ export function DocTable({
                                     const menuFolderAppliesToSelection =
                                         menuFolderIsSelected &&
                                         selectedItemCount > 1;
-                                    const surfaceProps: RowActionMenuSurfaceProps = {
-                                        className: "fixed z-[120]",
-                                        style: {
-                                            top: contextMenu.y,
-                                            left: contextMenu.x,
-                                        },
-                                        onClick: (e) => e.stopPropagation(),
-                                    };
-
-                                    return createPortal(
-                                        menuDoc ? (
+                                    return (
+                                        <DropdownAtPoint
+                                            point={{
+                                                x: contextMenu.x,
+                                                y: contextMenu.y,
+                                            }}
+                                            onClose={() => setContextMenu(null)}
+                                            className={ROW_ACTION_MENU_CLASS}
+                                            // React events bubble through
+                                            // the portal to the table.
+                                            onClick={(e) => e.stopPropagation()}
+                                        >
+                                        {menuDoc ? (
                                             <RowActionMenuItems
-                                                ref={contextMenuRef}
-                                                surfaceProps={surfaceProps}
                                                 onClose={() => setContextMenu(null)}
                                                 onDeselect={
                                                     menuDocIsSelected
@@ -4580,8 +4569,6 @@ export function DocTable({
                                             />
                                         ) : (
                                             <RowActionMenuItems
-                                                ref={contextMenuRef}
-                                                surfaceProps={surfaceProps}
                                                 onClose={() => setContextMenu(null)}
                                                 onDeselect={
                                                     menuFolderIsSelected
@@ -4662,8 +4649,8 @@ export function DocTable({
                                                         : "Delete folder"
                                                 }
                                             />
-                                        ),
-                                        document.body,
+                                        )}
+                                        </DropdownAtPoint>
                                     );
                                 })()}
                         </div>

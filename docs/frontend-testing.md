@@ -40,11 +40,14 @@ sends four content replies or eight reasoning replies through a browser
 collapses and resizes a live disclosure. Both cases run in the general assistant,
 project assistant and tabular-review chat (six browser scenarios).
 It uses the real Next.js/React renderer, fails on browser console errors and
-uncaught exceptions, and requires no model-provider key. It runs in the regular
-production Playwright suite and the separate **Assistant streaming (development)**
-job, including keyless CI runs. The development job matters because React's
-passive-update-depth warning is development-only. Make both checks required in
-branch protection; a workflow failure alone does not block a merge.
+uncaught exceptions, and requires no model-provider key. It belongs to the
+Playwright `synthetic` project (specs that mock every `/api` call in the
+browser), which CI runs as the **Assistant streaming (production, …)** jobs on
+every PR, without the Supabase/API stack. The **development** variants rerun it
+on `next dev`, because React's passive-update-depth warning is
+development-only; that job runs nightly, on manual dispatch, and on PRs
+labelled `stress` (see [e2e-ci.md](e2e-ci.md#development-stress-jobs)). Add the
+label to PRs that touch streaming or render loops.
 
 Run it against the documented local stack with:
 
@@ -57,7 +60,7 @@ empty storage state also allow a run without backend/auth setup:
 
 ```bash
 CI=1 PLAYWRIGHT_BASE_URL=http://localhost:3000 npm run test:e2e -- \
-  e2e/assistant-streaming.spec.ts --project=chromium --no-deps
+  e2e/assistant-streaming.spec.ts --project=synthetic
 ```
 
 For scroll state, observe the viewport and content size and respond to scroll

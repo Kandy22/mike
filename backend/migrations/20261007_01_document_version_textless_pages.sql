@@ -1,4 +1,4 @@
--- Migration date: 2026-10-02
+-- Migration date: 2026-10-07
 -- Record how many pages of an uploaded PDF have no text layer, so scanned PDFs
 -- without OCR can be flagged in the document list. Null means not measured:
 -- non-PDF files and versions created before this migration.

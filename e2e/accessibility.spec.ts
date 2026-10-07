@@ -23,8 +23,8 @@
  * pages. If one appears, exclude it with `.exclude("<selector>")` on the
  * AxeBuilder and document here what the selector is and why it's out of scope.
  *
- * Prerequisite: auth.setup.ts has already saved the session to e2e/.auth/user.json
- * (tests 2–4 inherit the authenticated storageState from playwright.config.ts).
+ * Auth: tests 2–4 run signed in as this worker's account (the storageState
+ * fixture in e2e/fixtures.ts).
  */
 import { test, expect, type Page } from "./fixtures";
 import AxeBuilder from "@axe-core/playwright";

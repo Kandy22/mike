@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { CustomInstructionsSection } from "@/app/components/settings/CustomInstructionsSection";
+import { ResponseStyleSection } from "@/app/components/settings/ResponseStyleSection";
 import { SettingsCard } from "@/app/components/settings/SettingsCard";
 import { SettingsHeading } from "@/app/components/settings/SettingsHeading";
 import { SettingsDescription } from "@/app/components/settings/SettingsText";
@@ -143,7 +145,7 @@ function PersonalisationForm({
   return (
     <div className="space-y-8">
       <section className="space-y-3">
-        <SettingsHeading>Personalisation</SettingsHeading>
+        <SettingsHeading>Your background</SettingsHeading>
         <SettingsDescription>
           Tell Mike about your role and practice so responses can be tailored to
           your professional context.
@@ -189,6 +191,10 @@ function PersonalisationForm({
           )}
         </SettingsCard>
       </section>
+
+      <ResponseStyleSection />
+
+      <CustomInstructionsSection />
     </div>
   );
 }
