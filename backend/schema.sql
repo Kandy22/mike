@@ -61,24 +61,15 @@ create table if not exists public.user_profiles (
   custom_instructions text not null default ''
     constraint user_profiles_custom_instructions_length
     check (char_length(custom_instructions) <= 8000),
-  -- Response style preferences from Settings > Personalisation (formatting
-  -- is the "Headers and Lists" setting); 'balanced' adds nothing to the
-  -- prompt.
-  response_verbosity text not null default 'balanced'
-    constraint user_profiles_response_verbosity_check
-    check (response_verbosity in ('concise', 'balanced', 'detailed')),
-  response_formatting text not null default 'balanced'
-    constraint user_profiles_response_formatting_check
-    check (response_formatting in ('balanced', 'less', 'more')),
-  response_tone text not null default 'balanced'
-    constraint user_profiles_response_tone_check
-    check (response_tone in ('formal', 'balanced', 'plain')),
-  -- 'auto' or a BCP 47 tag; the application owns the list of languages.
-  response_language text not null default 'auto'
-    constraint user_profiles_response_language_check
+  -- Response style preferences from Settings > Personalisation (verbosity,
+  -- headers and lists, tone, language) as one JSON object holding only the
+  -- choices that differ from the default. The backend owns the defaults and
+  -- validates every value, so a new setting needs no migration.
+  response_style jsonb not null default '{}'::jsonb
+    constraint user_profiles_response_style_check
     check (
-      response_language = 'auto'
-      or response_language ~ '^[a-z]{2,3}(-[A-Za-z]{2,4})?$'
+      jsonb_typeof(response_style) = 'object'
+      and octet_length(response_style::text) <= 2000
     ),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -170,6 +161,31 @@ $$;
 revoke all on function public.sync_user_password_set(uuid)
   from public, anon, authenticated;
 grant execute on function public.sync_user_password_set(uuid)
+  to service_role;
+
+-- Merges a change into one user's response style and returns the result, or
+-- null when the user has no profile. A null value in the patch removes that
+-- key, which is how a setting returns to its default. Merging in the database
+-- keeps two quick changes to different settings from overwriting each other.
+create or replace function public.merge_user_response_style(
+  p_user_id uuid,
+  p_patch jsonb
+)
+returns jsonb
+language sql
+set search_path = ''
+as $$
+  update public.user_profiles
+     set response_style = jsonb_strip_nulls(response_style || p_patch),
+         updated_at = now()
+   where user_id = p_user_id
+     and jsonb_typeof(p_patch) = 'object'
+  returning response_style;
+$$;
+
+revoke all on function public.merge_user_response_style(uuid, jsonb)
+  from public, anon, authenticated;
+grant execute on function public.merge_user_response_style(uuid, jsonb)
   to service_role;
 
 create or replace function public.handle_user_email_updated()
