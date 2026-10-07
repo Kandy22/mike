@@ -135,7 +135,7 @@ test("uses a floating icon header with no logo, tabs, or visible sign-out button
     page.getByRole("menuitem", { name: "Chat", exact: true }),
   ).toHaveCount(0);
   await expect(assistantItem).toHaveAttribute("data-selected", "true");
-  await expect(page.getByRole("menu")).toHaveClass(/rounded-xl/);
+  await expect(page.getByRole("menu")).toHaveClass(/rounded-2xl/);
   await expect(assistantItem).toHaveClass(/rounded-lg/);
   await expect(assistantItem.locator("svg")).toHaveCount(0);
   await quickActionsItem.hover();

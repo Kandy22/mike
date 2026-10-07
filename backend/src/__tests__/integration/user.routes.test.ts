@@ -556,7 +556,9 @@ describe("user.routes", () => {
                 .set(...AUTH);
 
             expect(res.status).toBe(500);
-            expect(res.body.detail).toBe("Something went wrong. Please try again.");
+            expect(res.body.detail).toBe(
+                "Something went wrong. Please try again.",
+            );
         });
     });
 
@@ -631,6 +633,166 @@ describe("user.routes", () => {
     });
 
     // ── POST /user/profile (bootstrap upsert) ─────────────────────────────
+    describe("custom instructions", () => {
+        it("returns the stored instructions", async () => {
+            supabaseState.tables.user_profiles = {
+                data: { custom_instructions: "Use British spelling." },
+                error: null,
+            };
+
+            const res = await request(app)
+                .get("/user/custom-instructions")
+                .set(...AUTH);
+
+            expect(res.status).toBe(200);
+            expect(res.body).toEqual({ content: "Use British spelling." });
+            expect(res.headers["cache-control"]).toBe("private, no-store");
+        });
+
+        it("reads as empty before the migration is applied", async () => {
+            supabaseState.missingColumns = ["custom_instructions"];
+
+            const res = await request(app)
+                .get("/user/custom-instructions")
+                .set(...AUTH);
+
+            expect(res.status).toBe(200);
+            expect(res.body).toEqual({ content: "" });
+        });
+
+        it("saves normalized instructions for the caller only", async () => {
+            supabaseState.tables.user_profiles = {
+                data: { custom_instructions: "Be concise." },
+                error: null,
+            };
+
+            const res = await request(app)
+                .put("/user/custom-instructions")
+                .set(...AUTH)
+                .send({ content: "Be concise.\r\n\n" });
+
+            expect(res.status).toBe(200);
+            expect(res.body).toEqual({ content: "Be concise." });
+            expect(supabaseState.updates.user_profiles).toEqual([
+                expect.objectContaining({ custom_instructions: "Be concise." }),
+            ]);
+        });
+
+        it("rejects over-long or non-string content", async () => {
+            const tooLong = await request(app)
+                .put("/user/custom-instructions")
+                .set(...AUTH)
+                .send({ content: "x".repeat(8001) });
+            expect(tooLong.status).toBe(400);
+            expect(tooLong.body.detail).toMatch(/8000 characters or fewer/);
+
+            const wrongType = await request(app)
+                .put("/user/custom-instructions")
+                .set(...AUTH)
+                .send({ content: 1 });
+            expect(wrongType.status).toBe(400);
+            expect(supabaseState.updates.user_profiles).toBeUndefined();
+        });
+    });
+
+    describe("response style", () => {
+        it("returns the stored choices with defaults filled in", async () => {
+            supabaseState.tables.user_profiles = {
+                data: {
+                    response_style: {
+                        verbosity: "detailed",
+                        language: "en-GB",
+                    },
+                },
+                error: null,
+            };
+
+            const res = await request(app)
+                .get("/user/response-style")
+                .set(...AUTH);
+
+            expect(res.status).toBe(200);
+            expect(res.body).toEqual({
+                verbosity: "detailed",
+                formatting: "balanced",
+                tone: "balanced",
+                language: "en-GB",
+            });
+            expect(res.headers["cache-control"]).toBe("private, no-store");
+        });
+
+        it("reads as the default before the migration is applied", async () => {
+            supabaseState.missingColumns = ["response_style"];
+
+            const res = await request(app)
+                .get("/user/response-style")
+                .set(...AUTH);
+
+            expect(res.status).toBe(200);
+            expect(res.body).toEqual({
+                verbosity: "balanced",
+                formatting: "balanced",
+                tone: "balanced",
+                language: "auto",
+            });
+        });
+
+        it("merges only the field that changed, for the caller only", async () => {
+            // The merge function returns the user's whole stored object.
+            supabaseRpc.mockResolvedValue({
+                data: { verbosity: "concise", tone: "plain" },
+                error: null,
+            });
+
+            const res = await request(app)
+                .put("/user/response-style")
+                .set(...AUTH)
+                .send({ tone: "plain" });
+
+            expect(res.status).toBe(200);
+            expect(res.body).toEqual({
+                verbosity: "concise",
+                formatting: "balanced",
+                tone: "plain",
+                language: "auto",
+            });
+            expect(supabaseRpc).toHaveBeenCalledWith(
+                "merge_user_response_style",
+                {
+                    p_user_id: expect.any(String),
+                    p_patch: { tone: "plain" },
+                },
+            );
+            // Nothing is written outside the merge function.
+            expect(supabaseState.updates.user_profiles).toBeUndefined();
+        });
+
+        it("reports a missing profile as not found", async () => {
+            supabaseRpc.mockResolvedValue({ data: null, error: null });
+
+            const res = await request(app)
+                .put("/user/response-style")
+                .set(...AUTH)
+                .send({ tone: "plain" });
+
+            expect(res.status).toBe(404);
+        });
+
+        it("rejects an unknown value without calling the database", async () => {
+            const res = await request(app)
+                .put("/user/response-style")
+                .set(...AUTH)
+                .send({ formatting: "fancy" });
+
+            expect(res.status).toBe(400);
+            expect(res.body.detail).toMatch(/formatting must be one of/);
+            expect(supabaseRpc).not.toHaveBeenCalledWith(
+                "merge_user_response_style",
+                expect.anything(),
+            );
+        });
+    });
+
     describe("POST /user/profile", () => {
         it("ensures the profile row and returns ok", async () => {
             const res = await request(app)
@@ -731,7 +893,9 @@ describe("user.routes", () => {
                 .send({ api_key: "sk-x" });
 
             expect(res.status).toBe(500);
-            expect(res.body.detail).toBe("Something went wrong. Please try again.");
+            expect(res.body.detail).toBe(
+                "Something went wrong. Please try again.",
+            );
         });
 
         it("is rejected with 403 mfa_verification_required when MFA is unsatisfied", async () => {
@@ -896,26 +1060,22 @@ describe("user.routes", () => {
         it.each([
             ["displayName", "display_name"],
             ["organisation", "organisation"],
-        ] as const)(
-            "truncates %s to 200 characters",
-            async (field, column) => {
-                supabaseState.tables.user_profiles = {
-                    data: profileRow(),
-                    error: null,
-                };
+        ] as const)("truncates %s to 200 characters", async (field, column) => {
+            supabaseState.tables.user_profiles = {
+                data: profileRow(),
+                error: null,
+            };
 
-                const res = await request(app)
-                    .patch("/user/profile")
-                    .set(...AUTH)
-                    .send({ [field]: "x".repeat(250) });
+            const res = await request(app)
+                .patch("/user/profile")
+                .set(...AUTH)
+                .send({ [field]: "x".repeat(250) });
 
-                expect(res.status).toBe(200);
-                const written = supabaseState.updates.user_profiles?.at(-1) as
-                    | Record<string, unknown>
-                    | undefined;
-                expect(written?.[column]).toBe("x".repeat(200));
-            },
-        );
+            expect(res.status).toBe(200);
+            const written = supabaseState.updates.user_profiles?.at(-1) as
+                Record<string, unknown> | undefined;
+            expect(written?.[column]).toBe("x".repeat(200));
+        });
     });
 
     describe("POST /user/onboarding", () => {
@@ -985,7 +1145,9 @@ describe("user.routes", () => {
                 .send({ jurisdiction: "" });
 
             expect(res.status).toBe(400);
-            expect(res.body.detail).toBe("Select a valid jurisdiction of practice");
+            expect(res.body.detail).toBe(
+                "Select a valid jurisdiction of practice",
+            );
         });
 
         it("requires a valid professional setting", async () => {
@@ -999,9 +1161,7 @@ describe("user.routes", () => {
                 });
 
             expect(res.status).toBe(400);
-            expect(res.body.detail).toBe(
-                "Select a valid professional setting",
-            );
+            expect(res.body.detail).toBe("Select a valid professional setting");
         });
 
         it("allows onboarding completion without a display name", async () => {
@@ -1043,10 +1203,9 @@ describe("user.routes", () => {
 
             expect(res.status).toBe(200);
             expect(res.body.passwordSet).toBe(true);
-            expect(supabaseRpc).toHaveBeenCalledWith(
-                "sync_user_password_set",
-                { p_user_id: "u1" },
-            );
+            expect(supabaseRpc).toHaveBeenCalledWith("sync_user_password_set", {
+                p_user_id: "u1",
+            });
         });
 
         it("rejects the marker when Supabase has no password", async () => {
@@ -1120,7 +1279,9 @@ describe("user.routes", () => {
                 .set(...AUTH);
 
             expect(res.status).toBe(500);
-            expect(res.body.detail).toBe("Something went wrong. Please try again.");
+            expect(res.body.detail).toBe(
+                "Something went wrong. Please try again.",
+            );
         });
 
         it("GET /user/export is rejected when MFA is unsatisfied", async () => {
@@ -1291,7 +1452,9 @@ describe("user.routes", () => {
                 .set(...AUTH);
 
             expect(res.status).toBe(500);
-            expect(res.body.detail).toBe("Something went wrong. Please try again.");
+            expect(res.body.detail).toBe(
+                "Something went wrong. Please try again.",
+            );
         });
 
         it("DELETE /user/account returns 500 when the cascade cannot be scheduled", async () => {
@@ -1319,7 +1482,9 @@ describe("user.routes", () => {
                 .set(...AUTH);
 
             expect(res.status).toBe(500);
-            expect(res.body.detail).toBe("Something went wrong. Please try again.");
+            expect(res.body.detail).toBe(
+                "Something went wrong. Please try again.",
+            );
         });
 
         it("DELETE /user/account is rejected when MFA is unsatisfied (no cleanup)", async () => {
