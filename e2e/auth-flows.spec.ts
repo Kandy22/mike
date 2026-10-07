@@ -152,9 +152,9 @@ test.describe("logout (isolated user)", () => {
     await expect(userMenuButton).toBeVisible({ timeout: 10_000 });
     await userMenuButton.click();
 
-    /* The dropdown that appears contains a "Settings" button which
+    /* The dropdown that appears contains a "Settings" menu item which
        navigates to /settings via router.push("/settings"). */
-    const accountSettingsItem = page.getByRole("button", {
+    const accountSettingsItem = page.getByRole("menuitem", {
         name: "Settings",
     });
     await expect(accountSettingsItem).toBeVisible({ timeout: 5_000 });
@@ -169,7 +169,7 @@ test.describe("logout (isolated user)", () => {
        for (badly: it can't tell a settled page from a stalled one). */
     await expect(userMenuButton).toBeVisible({ timeout: 10_000 });
     await userMenuButton.click();
-    const signOutButton = page.getByRole("button", {
+    const signOutButton = page.getByRole("menuitem", {
         name: "Sign out",
         exact: true,
     });

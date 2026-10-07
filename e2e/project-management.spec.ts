@@ -64,7 +64,7 @@ test("rename a project via Edit details", async ({ page }) => {
      * inline "Rename" affordance is gone; renaming now happens in
      * ProjectDetailsModal, which also carries the CM number and practice fields.
      */
-    await page.getByRole("button", { name: "Edit details", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Edit details", exact: true }).click();
 
     /* ProjectDetailsModal's name field is pre-filled with the current name;
        fill() clears it first, platform-independently. */
@@ -119,9 +119,9 @@ test("delete a project", async ({ page }) => {
     await expect(actionsBtn).toBeVisible({ timeout: 3_000 });
     await actionsBtn.click();
 
-    /* exact:true so the substring match can't pick up any other button whose
+    /* exact:true so the substring match can't pick up any other item whose
        accessible name merely contains "Delete". */
-    const deleteBtn = page.getByRole("button", { name: "Delete", exact: true });
+    const deleteBtn = page.getByRole("menuitem", { name: "Delete", exact: true });
     await expect(deleteBtn).toBeVisible({ timeout: 3_000 });
 
     // REGRESSION: fails if `handleDeleteSelected` is removed
