@@ -700,6 +700,7 @@ describe("user.routes", () => {
                     response_verbosity: "detailed",
                     response_formatting: "less",
                     response_tone: "formal",
+                    response_language: "en-GB",
                 },
                 error: null,
             };
@@ -713,6 +714,7 @@ describe("user.routes", () => {
                 verbosity: "detailed",
                 formatting: "less",
                 tone: "formal",
+                language: "en-GB",
             });
             expect(res.headers["cache-control"]).toBe("private, no-store");
         });
@@ -729,6 +731,7 @@ describe("user.routes", () => {
                 verbosity: "balanced",
                 formatting: "balanced",
                 tone: "balanced",
+                language: "auto",
             });
         });
 
@@ -752,6 +755,7 @@ describe("user.routes", () => {
                 verbosity: "balanced",
                 formatting: "balanced",
                 tone: "plain",
+                language: "auto",
             });
             expect(supabaseState.updates.user_profiles).toHaveLength(1);
             const [update] = supabaseState.updates.user_profiles as Record<

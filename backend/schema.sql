@@ -73,6 +73,13 @@ create table if not exists public.user_profiles (
   response_tone text not null default 'balanced'
     constraint user_profiles_response_tone_check
     check (response_tone in ('formal', 'balanced', 'plain')),
+  -- 'auto' or a BCP 47 tag; the application owns the list of languages.
+  response_language text not null default 'auto'
+    constraint user_profiles_response_language_check
+    check (
+      response_language = 'auto'
+      or response_language ~ '^[a-z]{2,3}(-[A-Za-z]{2,4})?$'
+    ),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
