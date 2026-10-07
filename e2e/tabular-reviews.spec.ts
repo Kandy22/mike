@@ -5,8 +5,8 @@
  *   3. Review detail page — table structure and toolbar controls render
  *   4. Add a document — upload via AddDocumentsModal, row appears in table
  *
- * Prerequisite: auth.setup.ts has already saved the session to e2e/.auth/user.json
- * Test user: e2e@mike.local / E2eTestPass1! (storageState inherited from playwright.config.ts)
+ * Auth: runs signed in as this worker's account (the storageState fixture in
+ * e2e/fixtures.ts; e2e@mike.local on worker 0).
  */
 import { test, expect } from "./fixtures";
 import { PDF_FIXTURE } from "./helpers";
