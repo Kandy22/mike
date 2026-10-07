@@ -205,6 +205,123 @@ describe("SidebarProjectItem", () => {
     );
   });
 
+  it("keeps a refreshed chat list when a See more page lands afterwards", async () => {
+    // See more starts a review-page request; navigating inside the active
+    // project refreshes the list (here: a new chat) before that request
+    // finishes. The late page must not bring back the list that was on
+    // screen when See more was clicked.
+    const current = project();
+    const firstPage = Array.from({ length: 11 }, (_, index) =>
+      review(`r${index}`, `Review ${index}`, `2026-09-${10 + index}T00:00:00Z`),
+    );
+    let finishPage: (rows: TabularReview[]) => void = () => {};
+    vi.mocked(listProjectChats).mockResolvedValue([]);
+    vi.mocked(listTabularReviews).mockImplementation(
+      (_projectId, options) =>
+        options?.offset
+          ? new Promise((resolve) => (finishPage = resolve))
+          : Promise.resolve(firstPage),
+    );
+    const { rerender } = renderItem(current, {
+      pathname: `/projects/${current.id}`,
+    });
+    await screen.findByRole("link", { name: "Tabular review: Review 9" });
+
+    fireEvent.click(screen.getByRole("button", { name: "See more" }));
+    await waitFor(() =>
+      expect(listTabularReviews).toHaveBeenCalledWith(
+        current.id,
+        expect.objectContaining({ offset: 10 }),
+      ),
+    );
+
+    vi.mocked(listProjectChats).mockResolvedValue([
+      chat("c-new", "New matter chat", "2026-10-05T00:00:00Z"),
+    ]);
+    rerender(
+      <SidebarProjectItem
+        project={current}
+        pathname={`/projects/${current.id}/assistant/chat/c-new`}
+        expanded
+        onExpandedChange={vi.fn()}
+        onOpenProject={vi.fn()}
+      />,
+    );
+    await screen.findByRole("link", { name: "Chat: New matter chat" });
+
+    // Recent enough that it would show if it were merged. It started before
+    // the refresh, so it is dropped instead.
+    finishPage([review("r-late", "Late page review", "2026-10-04T00:00:00Z")]);
+    await screen.findByRole("button", { name: "See more" });
+    expect(
+      screen.getByRole("link", { name: "Chat: New matter chat" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "Tabular review: Late page review" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("drops a See more page that started before a refresh", async () => {
+    // Reviews page newest-created first. A review created while a page is in
+    // flight shifts every offset by one, so that page no longer lines up
+    // with the refreshed list: merging it would skip a review and could
+    // carry a stale "no more pages" flag.
+    const current = project();
+    const older = Array.from({ length: 11 }, (_, index) =>
+      review(`r${index}`, `Review ${index}`, `2026-09-${10 + index}T00:00:00Z`),
+    );
+    const created = review("r-new", "New review", "2026-10-05T00:00:00Z");
+    let firstPageCalls = 0;
+    let laterPageCalls = 0;
+    let finishStalePage: (rows: TabularReview[]) => void = () => {};
+    vi.mocked(listProjectChats).mockResolvedValue([]);
+    vi.mocked(listTabularReviews).mockImplementation((_projectId, options) => {
+      if (!options?.offset) {
+        firstPageCalls += 1;
+        return Promise.resolve(
+          firstPageCalls === 1 ? older : [created, ...older.slice(0, 10)],
+        );
+      }
+      laterPageCalls += 1;
+      return laterPageCalls === 1
+        ? new Promise((resolve) => (finishStalePage = resolve))
+        : Promise.resolve(older.slice(9));
+    });
+    const { rerender } = renderItem(current, {
+      pathname: `/projects/${current.id}`,
+    });
+    await screen.findByRole("link", { name: "Tabular review: Review 9" });
+
+    fireEvent.click(screen.getByRole("button", { name: "See more" }));
+    await waitFor(() => expect(laterPageCalls).toBe(1));
+
+    rerender(
+      <SidebarProjectItem
+        project={current}
+        pathname={`/projects/${current.id}/tabular-reviews/r-new`}
+        expanded
+        onExpandedChange={vi.fn()}
+        onOpenProject={vi.fn()}
+      />,
+    );
+    await screen.findByRole("link", { name: "Tabular review: New review" });
+
+    // The stale page holds only the old 11th review and says there is
+    // nothing after it.
+    finishStalePage([older[10]]);
+    // The button reads "Loading..." until the page settles.
+    await screen.findByRole("button", { name: "See more" });
+
+    // The refreshed list still has more to load, so See more asks the
+    // server again from the refreshed offset.
+    fireEvent.click(screen.getByRole("button", { name: "See more" }));
+    await waitFor(() => expect(laterPageCalls).toBe(2));
+    expect(listTabularReviews).toHaveBeenLastCalledWith(
+      current.id,
+      expect.objectContaining({ offset: 10 }),
+    );
+  });
+
   it("shows an empty state", async () => {
     vi.mocked(listProjectChats).mockResolvedValue([]);
     vi.mocked(listTabularReviews).mockResolvedValue([]);
@@ -215,12 +332,74 @@ describe("SidebarProjectItem", () => {
     ).toBeInTheDocument();
   });
 
-  it("still lists chats when only the reviews request fails", async () => {
-    vi.mocked(listTabularReviews).mockRejectedValue(new Error("boom"));
+  it("still lists chats when only the reviews request fails, with a retry", async () => {
+    vi.mocked(listTabularReviews).mockRejectedValueOnce(new Error("boom"));
     renderItem(project());
 
     expect(
       await screen.findByRole("link", { name: "Chat: Due diligence" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Some items could not be loaded.",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(
+      await screen.findByRole("link", { name: "Tabular review: Lease review" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("offers a retry instead of the empty state when one request fails", async () => {
+    vi.mocked(listProjectChats).mockRejectedValueOnce(new Error("boom"));
+    vi.mocked(listTabularReviews).mockResolvedValueOnce([]);
+    renderItem(project());
+
+    expect(
+      await screen.findByRole("button", { name: "Retry" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("No chats or reviews yet"),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(
+      await screen.findByRole("link", { name: "Chat: Due diligence" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the loaded items and offers a retry when a refresh fails", async () => {
+    const current = project();
+    const { rerender } = renderItem(current, {
+      pathname: `/projects/${current.id}`,
+    });
+    await screen.findByRole("link", { name: "Chat: Due diligence" });
+
+    vi.mocked(listProjectChats).mockRejectedValueOnce(new Error("boom"));
+    vi.mocked(listTabularReviews).mockRejectedValueOnce(new Error("boom"));
+    rerender(
+      <SidebarProjectItem
+        project={current}
+        pathname={`/projects/${current.id}/assistant`}
+        expanded
+        onExpandedChange={vi.fn()}
+        onOpenProject={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not refresh items.",
+    );
+    expect(
+      screen.getByRole("link", { name: "Chat: Due diligence" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument(),
+    );
+    expect(
+      screen.getByRole("link", { name: "Tabular review: Lease review" }),
     ).toBeInTheDocument();
   });
 

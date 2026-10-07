@@ -5,8 +5,8 @@
  *   3. Delete a chat from sidebar — verifies delete API and sidebar removal
  *   4. Project assistant: create a new chat and submit a question
  *
- * Auth: inherits storageState from playwright.config.ts ("e2e/.auth/user.json")
- * Test user: e2e@mike.local / E2eTestPass1!
+ * Auth: runs signed in as this worker's account (the storageState fixture in
+ * e2e/fixtures.ts; e2e@mike.local on worker 0).
  */
 import { test, expect, type Page } from "./fixtures";
 import { hasLlmKey, LLM_SKIP_REASON } from "./llm";

@@ -72,6 +72,8 @@ type ProjectItemsData = {
     chats: Chat[];
     reviews: TabularReview[];
     hasMoreReviews: boolean;
+    /** One of the two requests failed; the other list is still shown. */
+    incomplete: boolean;
 };
 
 // Survives the sidebar remounting, so reopening a project shows its last
@@ -115,6 +117,8 @@ async function loadProjectItems(
         reviews: reviews.status === "fulfilled" ? reviews.value.reviews : [],
         hasMoreReviews:
             reviews.status === "fulfilled" && reviews.value.hasMore,
+        incomplete:
+            chats.status === "rejected" || reviews.status === "rejected",
     };
 }
 
@@ -179,23 +183,36 @@ export function SidebarProjectItem({
         const nextCount = visibleCount + PROJECT_RECENT_ITEM_PAGE_SIZE;
         if (data.hasMoreReviews) {
             setLoadingMore(true);
+            // The page's offset comes from this list. If a refresh has
+            // replaced it by the time the page lands (or had already landed
+            // but not yet re-rendered when this click ran), the offsets no
+            // longer line up, so the page is dropped. The refreshed list
+            // keeps its own hasMoreReviews and the next click fetches again.
+            const requestedFrom = data;
             try {
                 const page = await fetchReviewPage(
                     project.id,
                     data.reviews.length,
                     REVIEW_PAGE_SIZE,
                 );
-                const seen = new Set(data.reviews.map((review) => review.id));
-                const next = {
-                    ...data,
-                    reviews: [
-                        ...data.reviews,
-                        ...page.reviews.filter((review) => !seen.has(review.id)),
-                    ],
-                    hasMoreReviews: page.hasMore,
-                };
-                projectItemsCache.set(project.id, next);
-                setData(next);
+                setData((current) => {
+                    if (!current || current !== requestedFrom) return current;
+                    const seen = new Set(
+                        current.reviews.map((review) => review.id),
+                    );
+                    const next = {
+                        ...current,
+                        reviews: [
+                            ...current.reviews,
+                            ...page.reviews.filter(
+                                (review) => !seen.has(review.id),
+                            ),
+                        ],
+                        hasMoreReviews: page.hasMore,
+                    };
+                    projectItemsCache.set(project.id, next);
+                    return next;
+                });
             } catch {
                 // Show what has loaded; the next "See more" retries.
             } finally {
@@ -204,6 +221,22 @@ export function SidebarProjectItem({
         }
         setVisibleCount(nextCount);
     };
+
+    const retryRow = (message: string) => (
+        <li className="flex min-h-7 flex-wrap items-center gap-x-2 pl-2 pr-2 text-xs text-gray-500">
+            <span role="alert">{message}</span>
+            <button
+                type="button"
+                onClick={() => {
+                    setLoadError(false);
+                    setReloadKey((key) => key + 1);
+                }}
+                className="font-medium text-gray-700 hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+            >
+                Retry
+            </button>
+        </li>
+    );
 
     const listId = `sidebar-project-items-${project.id}`;
     // Sub-rows are not indented: they share the project row's pl-2, 16px
@@ -289,20 +322,15 @@ export function SidebarProjectItem({
                                 </span>
                             </li>
                         ))
-                    ) : loadError && data === null ? (
-                        <li className="flex min-h-7 flex-wrap items-center gap-x-2 pl-2 pr-2 text-xs text-gray-500">
-                            <span role="alert">Could not load items.</span>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setLoadError(false);
-                                    setReloadKey((key) => key + 1);
-                                }}
-                                className="font-medium text-gray-700 hover:text-gray-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
-                            >
-                                Retry
-                            </button>
-                        </li>
+                    ) : (loadError || data?.incomplete) &&
+                      (items === null || items.length === 0) ? (
+                        // Nothing to show: a failed load or refresh, or one
+                        // request failed and the other came back empty.
+                        retryRow(
+                            loadError && data !== null
+                                ? "Could not refresh items."
+                                : "Could not load items.",
+                        )
                     ) : items && items.length === 0 ? (
                         <li className="flex min-h-7 items-center pl-2 pr-2 text-xs text-gray-500">
                             No chats or reviews yet
@@ -348,6 +376,12 @@ export function SidebarProjectItem({
                                     </li>
                                 );
                             })}
+                            {/* A refresh that failed keeps the items it
+                                had; a partial load shows what did load. */}
+                            {loadError
+                                ? retryRow("Could not refresh items.")
+                                : data?.incomplete &&
+                                  retryRow("Some items could not be loaded.")}
                             {canSeeMore && (
                                 <li>
                                     <button
