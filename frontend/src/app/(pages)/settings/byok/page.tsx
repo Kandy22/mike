@@ -24,6 +24,11 @@ const MODEL_API_KEY_FIELDS = [
     placeholder: "sk-...",
   },
   {
+    provider: "mistral",
+    label: "Mistral AI API Key",
+    placeholder: "Enter your Mistral API key",
+  },
+  {
     provider: "openrouter",
     label: "OpenRouter API Key",
     placeholder: "sk-or-...",

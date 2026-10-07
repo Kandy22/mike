@@ -45,6 +45,8 @@ export default function ModelPreferencesPage() {
   const { profile, updateModelPreference } = useUserProfile();
   const ollamaModels = useOllamaModels();
   const configuredModels = useConfiguredModels();
+  const preferenceModelId = (id: string) =>
+    configuredModels.some((model) => model.id === id) ? id : canonicalModelId(id);
   const [savingField, setSavingField] = useState<ModelPreferenceField | null>(
     null,
   );
@@ -104,7 +106,7 @@ export default function ModelPreferencesPage() {
               </SettingsDescription>
             </div>
             <ModelPreferenceDropdown
-              value={canonicalModelId(
+              value={preferenceModelId(
                 optimisticValues.titleModel ?? profile?.titleModel ?? "",
               )}
               options={mergeConfiguredModelOptions(configuredModels, [
@@ -130,7 +132,7 @@ export default function ModelPreferencesPage() {
               </SettingsDescription>
             </div>
             <ModelPreferenceDropdown
-              value={canonicalModelId(
+              value={preferenceModelId(
                 optimisticValues.tabularModel ?? profile?.tabularModel ?? "",
               )}
               options={mergeConfiguredModelOptions(configuredModels, [
@@ -157,7 +159,7 @@ export default function ModelPreferencesPage() {
               </SettingsDescription>
             </div>
             <ModelPreferenceDropdown
-              value={canonicalModelId(
+              value={preferenceModelId(
                 optimisticValues.memoryCuratorModel ??
                   profile?.memoryCuratorModel ??
                   "",
