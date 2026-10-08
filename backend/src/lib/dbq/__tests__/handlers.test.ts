@@ -521,7 +521,7 @@ describe("handleExportBuild", () => {
         expect(contentType).toMatch(/^text\/csv/);
         expect(out.filename).toBe("history-export.csv");
         expect(out.content_type).toMatch(/^text\/csv/);
-        // The sync /audit/export route records no audit row; nor does this.
+        // Exporting history does not itself record an audit row.
         expect(recordAudit).not.toHaveBeenCalled();
     });
 

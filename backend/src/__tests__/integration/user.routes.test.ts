@@ -1224,72 +1224,15 @@ describe("user.routes", () => {
         });
     });
 
-    // ── Data export endpoints (MFA-guarded, attachment headers) ───────────
-    describe("data export endpoints", () => {
-        it("GET /user/export returns the account export as a JSON attachment", async () => {
-            const res = await request(app)
-                .get("/user/export")
-                .set(...AUTH);
-
-            expect(res.status).toBe(200);
-            expect(res.body).toEqual({ account: "data" });
-            expect(res.headers["content-type"]).toContain("application/json");
-            expect(res.headers["content-disposition"]).toContain("attachment");
-            expect(res.headers["content-disposition"]).toContain(
-                "mike-account-export-u1.json",
-            );
-            expect(buildUserAccountExport).toHaveBeenCalledWith(
-                expect.anything(),
-                "u1",
-                "u1@test.local",
-            );
-        });
-
-        it("GET /user/chats/export returns the chats export", async () => {
-            const res = await request(app)
-                .get("/user/chats/export")
-                .set(...AUTH);
-
-            expect(res.status).toBe(200);
-            expect(res.body).toEqual({ chats: "data" });
-            expect(res.headers["content-disposition"]).toContain(
-                "mike-chats-export-u1.json",
-            );
-            expect(buildUserChatsExport).toHaveBeenCalledTimes(1);
-        });
-
-        it("GET /user/tabular-reviews/export returns the reviews export", async () => {
-            const res = await request(app)
-                .get("/user/tabular-reviews/export")
-                .set(...AUTH);
-
-            expect(res.status).toBe(200);
-            expect(res.body).toEqual({ reviews: "data" });
-            expect(res.headers["content-disposition"]).toContain(
-                "mike-tabular-reviews-export-u1.json",
-            );
-            expect(buildUserTabularReviewsExport).toHaveBeenCalledTimes(1);
-        });
-
-        it("GET /user/export returns 500 when the builder throws", async () => {
-            buildUserAccountExport.mockRejectedValue(new Error("export boom"));
-
-            const res = await request(app)
-                .get("/user/export")
-                .set(...AUTH);
-
-            expect(res.status).toBe(500);
-            expect(res.body.detail).toBe(
-                "Something went wrong. Please try again.",
-            );
-        });
-
-        it("GET /user/export is rejected when MFA is unsatisfied", async () => {
+    // ── Data export endpoint (MFA-guarded) ─────────────────────────────────
+    describe("data export endpoint", () => {
+        it("POST /user/exports is rejected when MFA is unsatisfied", async () => {
             requireMfaIfEnrolled.mockImplementation(rejectMfa);
 
             const res = await request(app)
-                .get("/user/export")
-                .set(...AUTH);
+                .post("/user/exports")
+                .set(...AUTH)
+                .send({ type: "account" });
 
             expect(res.status).toBe(403);
             expect(res.body.code).toBe("mfa_verification_required");
