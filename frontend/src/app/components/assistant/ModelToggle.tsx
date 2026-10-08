@@ -86,7 +86,7 @@ const MODEL_NAME_ACRONYMS: Record<string, string> = {
 
 export function modelDisplayName(modelId: string): string {
   const normalized = modelId
-    .replace(/^(?:openrouter|vercel|opencode-go|ollama)\//, "")
+    .replace(/^(?:openrouter|vercel|opencode-go|bedrock|azure|ollama)\//, "")
     .split("/")
     .at(-1)!
     .replace(/(\d)-(\d)/g, "$1.$2");
@@ -116,7 +116,13 @@ export function modelDisplayName(modelId: string): string {
  * Router slugs, which double as model-id prefixes and API-key provider names.
  * Kept in sync with backend/src/lib/routerModels.ts ROUTER_SLUGS.
  */
-export const ROUTER_SLUGS = ["openrouter", "vercel", "opencode-go"] as const;
+export const ROUTER_SLUGS = [
+  "openrouter",
+  "vercel",
+  "opencode-go",
+  "bedrock",
+  "azure",
+] as const;
 export type RouterSlug = (typeof ROUTER_SLUGS)[number];
 
 const ROUTER_VENDOR_GROUPS: Record<string, string> = {
@@ -140,6 +146,8 @@ const ROUTER_VENDOR_GROUPS: Record<string, string> = {
   mimo: "Xiaomi",
   mistral: "Mistral AI",
   mistralai: "Mistral AI",
+  meta: "Meta",
+  amazon: "Amazon",
 };
 
 /** Model maker used for grouping; the router remains a separate source. */
@@ -186,6 +194,8 @@ interface Props {
   openRouterModels?: string[];
   vercelModels?: string[];
   openCodeGoModels?: string[];
+  bedrockModels?: string[];
+  azureModels?: string[];
   compact?: boolean;
   tone?: "muted" | "default";
   /** Render as a full-width liquid-glass control inside a modal form. */
@@ -229,6 +239,58 @@ export function vercelModelOptions(models: string[]): ModelOption[] {
   }));
 }
 
+// Bedrock's cross-region inference-profile prefixes ("us.anthropic.claude-…").
+const BEDROCK_GEO_PREFIXES = new Set([
+  "us",
+  "us-gov",
+  "eu",
+  "apac",
+  "jp",
+  "au",
+  "ca",
+  "global",
+]);
+
+/**
+ * A Bedrock model id ("us.anthropic.claude-opus-5-5", "meta.llama4-v1:0", or
+ * an inference-profile ARN) as vendor/model, with the geo prefix and version
+ * suffix that only matter to AWS removed.
+ */
+export function bedrockCatalogModel(modelId: string): string {
+  const parts = modelId.split("/").at(-1)!.split(".");
+  if (parts.length > 2 && BEDROCK_GEO_PREFIXES.has(parts[0]!)) parts.shift();
+  if (parts.length < 2) return modelId;
+  const [vendor, ...rest] = parts;
+  const name = rest
+    .join(".")
+    .replace(/-v\d+(?::\d+)?$/, "")
+    .replace(/:\d+$/, "")
+    .replace(/-\d{8}$/, "");
+  return `${vendor}/${name}`;
+}
+
+export function bedrockModelOptions(models: string[]): ModelOption[] {
+  return models.map((model) => {
+    const catalogModel = bedrockCatalogModel(model);
+    return {
+      id: `bedrock/${model}`,
+      label: modelDisplayName(catalogModel),
+      group: underlyingProviderGroup(catalogModel, "bedrock"),
+      source: "Amazon Bedrock",
+    };
+  });
+}
+
+/** Azure deployments are named by their owner; the name is the label. */
+export function azureModelOptions(models: string[]): ModelOption[] {
+  return models.map((model) => ({
+    id: `azure/${model}`,
+    label: modelDisplayName(model),
+    group: underlyingProviderGroup(model, "azure"),
+    source: "Azure OpenAI",
+  }));
+}
+
 export function openCodeGoModelOptions(models: string[]): ModelOption[] {
   return models.map((model) => ({
     id: `opencode-go/${model}`,
@@ -258,6 +320,8 @@ export function ModelToggle({
   openRouterModels = [],
   vercelModels = [],
   openCodeGoModels = [],
+  bedrockModels = [],
+  azureModels = [],
   compact = false,
   tone,
   modalInput = false,
@@ -273,6 +337,8 @@ export function ModelToggle({
     ...openRouterModelOptions(openRouterModels),
     ...vercelModelOptions(vercelModels),
     ...openCodeGoModelOptions(openCodeGoModels),
+    ...bedrockModelOptions(bedrockModels),
+    ...azureModelOptions(azureModels),
     ...ollamaModels.map((model) => ({
       ...model,
       label: modelDisplayName(model.id),
@@ -309,6 +375,8 @@ export function ModelToggle({
     openrouter: openRouterModels,
     vercel: vercelModels,
     "opencode-go": openCodeGoModels,
+    bedrock: bedrockModels,
+    azure: azureModels,
   });
   return (
     <ModelToggleUI

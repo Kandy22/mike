@@ -16,6 +16,8 @@ import { type ApiKeyState } from "@/app/lib/mikeApi";
 import {
   MODELS,
   SETTINGS_MODELS,
+  azureModelOptions,
+  bedrockModelOptions,
   canonicalModelId,
   mergeConfiguredModelOptions,
   openCodeGoModelOptions,
@@ -64,6 +66,10 @@ export default function ModelPreferencesPage() {
   const selectedOpenCodeGoOptions = openCodeGoModelOptions(
     profile?.openCodeGoModels ?? [],
   );
+  const selectedBedrockOptions = bedrockModelOptions(
+    profile?.bedrockModels ?? [],
+  );
+  const selectedAzureOptions = azureModelOptions(profile?.azureModels ?? []);
 
   useEffect(() => {
     return () => {
@@ -114,6 +120,8 @@ export default function ModelPreferencesPage() {
                 ...selectedOpenRouterOptions,
                 ...selectedVercelOptions,
                 ...selectedOpenCodeGoOptions,
+                ...selectedBedrockOptions,
+                ...selectedAzureOptions,
                 ...ollamaModels,
               ])}
               apiKeys={profile?.apiKeys}
@@ -140,6 +148,8 @@ export default function ModelPreferencesPage() {
                 ...selectedOpenRouterOptions,
                 ...selectedVercelOptions,
                 ...selectedOpenCodeGoOptions,
+                ...selectedBedrockOptions,
+                ...selectedAzureOptions,
                 ...ollamaModels,
               ])}
               apiKeys={profile?.apiKeys}
@@ -169,6 +179,8 @@ export default function ModelPreferencesPage() {
                 ...selectedOpenRouterOptions,
                 ...selectedVercelOptions,
                 ...selectedOpenCodeGoOptions,
+                ...selectedBedrockOptions,
+                ...selectedAzureOptions,
                 ...ollamaModels,
               ])}
               apiKeys={profile?.apiKeys}

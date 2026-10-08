@@ -14,6 +14,7 @@ const {
     requireMfaIfEnrolled,
     getUserApiKeyStatus,
     saveUserApiKey,
+    updateUserApiKeySettings,
     hasEnvApiKey,
     normalizeApiKeyProvider,
     deleteAllUserChats,
@@ -33,6 +34,7 @@ const {
     requireMfaIfEnrolled: vi.fn(),
     getUserApiKeyStatus: vi.fn(),
     saveUserApiKey: vi.fn(),
+    updateUserApiKeySettings: vi.fn(),
     hasEnvApiKey: vi.fn(),
     normalizeApiKeyProvider: vi.fn(),
     deleteAllUserChats: vi.fn(),
@@ -226,14 +228,23 @@ vi.mock("../../middleware/auth", () => ({
 // (which encrypts) and never echo plaintext — getUserApiKeyStatus returns
 // presence-only booleans. getUserApiKeys must be exported too — lib/userSettings
 // imports it at module load.
-vi.mock("../../modules/user/user.apiKeyStore", () => ({
+vi.mock("../../modules/user/user.apiKeyStore", async (importOriginal) => {
+    // The pure validation helpers run for real; every database touch is a spy.
+    const actual =
+        await importOriginal<typeof import("../../modules/user/user.apiKeyStore")>();
+    return {
+    isSettingsApiKeyProvider: actual.isSettingsApiKeyProvider,
+    normalizeProviderSettings: actual.normalizeProviderSettings,
+    updateUserApiKeySettings: (...args: unknown[]) =>
+        updateUserApiKeySettings(...args),
     getUserApiKeyStatus: (...args: unknown[]) => getUserApiKeyStatus(...args),
     saveUserApiKey: (...args: unknown[]) => saveUserApiKey(...args),
     hasEnvApiKey: (...args: unknown[]) => hasEnvApiKey(...args),
     normalizeApiKeyProvider: (...args: unknown[]) =>
         normalizeApiKeyProvider(...args),
     getUserApiKeys: vi.fn(async () => ({})),
-}));
+    };
+});
 
 vi.mock("../../modules/user/user.dataCleanup", () => ({
     deleteAllUserChats: (...args: unknown[]) => deleteAllUserChats(...args),
@@ -318,9 +329,18 @@ describe("user.routes", () => {
         dbJobsEnabled.mockReturnValue(true);
         getUserApiKeyStatus.mockResolvedValue(STATUS);
         saveUserApiKey.mockResolvedValue(undefined);
+        updateUserApiKeySettings.mockResolvedValue(true);
         hasEnvApiKey.mockReturnValue(false);
         normalizeApiKeyProvider.mockImplementation((v: string) =>
-            ["claude", "openai", "gemini", "openrouter", "vercel"].includes(v)
+            [
+                "claude",
+                "openai",
+                "gemini",
+                "openrouter",
+                "vercel",
+                "bedrock",
+                "azure",
+            ].includes(v)
                 ? v
                 : null,
         );
@@ -913,6 +933,95 @@ describe("user.routes", () => {
             });
             // Guarded: the crypto path is never reached.
             expect(saveUserApiKey).not.toHaveBeenCalled();
+        });
+
+        it("saves a Bedrock key together with its normalized region", async () => {
+            const res = await request(app)
+                .put("/user/api-keys/bedrock")
+                .set(...AUTH)
+                .send({ api_key: "bedrock-key", settings: { region: " US-East-1 " } });
+
+            expect(res.status).toBe(200);
+            expect(saveUserApiKey).toHaveBeenCalledWith(
+                "u1",
+                "bedrock",
+                "bedrock-key",
+                expect.anything(),
+                { bedrock: { region: "us-east-1" } },
+            );
+        });
+
+        it("rejects a Bedrock key without a valid region", async () => {
+            for (const settings of [undefined, { region: "not a region" }]) {
+                const res = await request(app)
+                    .put("/user/api-keys/bedrock")
+                    .set(...AUTH)
+                    .send({ api_key: "bedrock-key", settings });
+
+                expect(res.status).toBe(400);
+                expect(res.body.detail).toMatch(/AWS region/);
+            }
+            expect(saveUserApiKey).not.toHaveBeenCalled();
+        });
+
+        it("rejects an Azure endpoint outside Azure's AI hostnames", async () => {
+            const res = await request(app)
+                .put("/user/api-keys/azure")
+                .set(...AUTH)
+                .send({
+                    api_key: "azure-key",
+                    settings: { endpoint: "https://attacker.example/openai" },
+                });
+
+            expect(res.status).toBe(400);
+            expect(res.body.detail).toMatch(/Azure OpenAI endpoint/);
+            expect(saveUserApiKey).not.toHaveBeenCalled();
+        });
+
+        it("changes only the Azure endpoint when no new key is sent", async () => {
+            const res = await request(app)
+                .put("/user/api-keys/azure")
+                .set(...AUTH)
+                .send({ settings: { endpoint: "Contoso-OpenAI" } });
+
+            expect(res.status).toBe(200);
+            expect(updateUserApiKeySettings).toHaveBeenCalledWith(
+                "u1",
+                "azure",
+                { azure: { endpoint: "contoso-openai" } },
+                expect.anything(),
+            );
+            expect(saveUserApiKey).not.toHaveBeenCalled();
+        });
+
+        it("asks for a key first when changing settings with nothing saved", async () => {
+            updateUserApiKeySettings.mockResolvedValue(false);
+
+            const res = await request(app)
+                .put("/user/api-keys/bedrock")
+                .set(...AUTH)
+                .send({ settings: { region: "eu-west-2" } });
+
+            expect(res.status).toBe(400);
+            expect(res.body.detail).toBe(
+                "Save an API key before changing its settings.",
+            );
+        });
+
+        it("removes a Bedrock key and its region when neither is sent", async () => {
+            const res = await request(app)
+                .put("/user/api-keys/bedrock")
+                .set(...AUTH)
+                .send({ api_key: null });
+
+            expect(res.status).toBe(200);
+            expect(saveUserApiKey).toHaveBeenCalledWith(
+                "u1",
+                "bedrock",
+                null,
+                expect.anything(),
+                {},
+            );
         });
     });
 

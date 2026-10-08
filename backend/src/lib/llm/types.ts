@@ -11,6 +11,8 @@ export type Provider =
     | "openrouter"
     | "vercel"
     | "opencode-go"
+    | "bedrock"
+    | "azure"
     | "ollama";
 
 export const REASONING_LEVELS = [
@@ -64,7 +66,22 @@ export type UserApiKeys = {
     openrouter?: string | null;
     vercel?: string | null;
     "opencode-go"?: string | null;
+    bedrock?: string | null;
+    azure?: string | null;
     courtlistener?: string | null;
+    /**
+     * Non-secret settings that only make sense together with the key above
+     * them: the AWS region a Bedrock key belongs to, the Azure OpenAI
+     * resource an Azure key belongs to. Each entry comes from the same
+     * source (the user's saved key or the deployment's environment) as its
+     * key, so a user's key is never sent to the operator's endpoint.
+     */
+    providerSettings?: ProviderSettings;
+};
+
+export type ProviderSettings = {
+    bedrock?: { region: string } | null;
+    azure?: { endpoint: string } | null;
 };
 
 export type StreamChatParams = {

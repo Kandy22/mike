@@ -34,6 +34,49 @@ blocks use the existing shared AI SDK loop. The available reasoning controls are
 None and High. The API IDs are `mistral-large-4`, `mistral-medium-3-5`, and
 `mistral-small-2603`. Large 4 is currently a public preview, labeled accordingly.
 
+## Amazon Bedrock and Azure OpenAI setup
+
+Bedrock and Azure OpenAI keys only work together with a second, non-secret
+value, so each is saved with it under Settings → Bring Your Own Keys:
+
+| Provider | Key | Saved with |
+| --- | --- | --- |
+| Amazon Bedrock | A Bedrock API key from the Amazon Bedrock console | The AWS region the key was created in, for example `us-east-1` |
+| Azure OpenAI | The resource's API key | The resource name (`contoso-openai`) or its endpoint URL |
+
+Azure endpoints must be `https` URLs on `*.openai.azure.com`,
+`*.cognitiveservices.azure.com` or `*.services.ai.azure.com`; the backend
+rejects any other host because it sends the key there. Once a key is saved, its
+region or endpoint can be changed without re-entering the key.
+
+Self-hosted deployments can instead set `AWS_BEARER_TOKEN_BEDROCK` with
+`BEDROCK_AWS_REGION` (falling back to `AWS_REGION`), and `AZURE_API_KEY` with
+`AZURE_OPENAI_ENDPOINT` (or `AZURE_RESOURCE_NAME`). A key counts as configured
+only when its region or endpoint is also set. A personal key always runs with
+its own saved region or endpoint, never the deployment's, and removing it
+restores the environment pair.
+
+Neither platform publishes a catalog a key can list, so models are added by ID
+under Bring Your Own Keys → Routers once the key is saved:
+
+- **Bedrock:** model or inference-profile IDs enabled in the account and
+  region, such as `us.anthropic.claude-opus-5-5`, `amazon.nova-pro-v1:0`, or an
+  inference-profile ARN. Requests use the Converse API through
+  `@ai-sdk/amazon-bedrock` with bearer authentication; ambient AWS credentials
+  are never used. Claude models get a prompt-cache point on long chats.
+- **Azure OpenAI:** deployment names. Requests use the v1 Responses API through
+  `@ai-sdk/azure`. Reasoning controls are inferred from the deployment name, so
+  a deployment named after its model (`gpt-6.1-sol`) gets them and an
+  arbitrary name runs without them.
+
+The app-level model IDs are `bedrock/<model-id>` and `azure/<deployment>`. As
+with other routers, a request can only use a model in the requesting user's
+saved list. Before deploying this version to an existing database, apply
+`backend/migrations/20261008_03_bedrock_azure_user_api_keys.sql`; it extends the
+provider constraint and adds the nullable `settings` column that holds the
+region or endpoint. Encrypted key storage, ownership checks and RLS are
+unchanged.
+
 ## Saved selections
 
 Removed direct-provider IDs are normalized when read, including saved chat,

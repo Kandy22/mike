@@ -156,3 +156,129 @@ describe("user API key precedence", () => {
         delete process.env.USER_API_KEYS_ENCRYPTION_SECRET;
     });
 });
+
+describe("cloud-platform keys", () => {
+    const envVars = [
+        "AWS_BEARER_TOKEN_BEDROCK",
+        "BEDROCK_AWS_REGION",
+        "AWS_REGION",
+        "AZURE_API_KEY",
+        "AZURE_OPENAI_ENDPOINT",
+        "AZURE_RESOURCE_NAME",
+        "USER_API_KEYS_ENCRYPTION_SECRET",
+    ];
+
+    beforeEach(() => {
+        for (const v of envVars) delete process.env[v];
+        process.env.USER_API_KEYS_ENCRYPTION_SECRET = "test-secret";
+    });
+
+    afterEach(() => {
+        for (const v of envVars) delete process.env[v];
+    });
+
+    function memoryDb() {
+        const rows = new Map<string, Record<string, unknown>>();
+        return {
+            rows,
+            db: {
+                from: () => ({
+                    upsert: async (row: Record<string, unknown>) => {
+                        rows.set(String(row.provider), row);
+                        return { error: null };
+                    },
+                    delete: () => ({
+                        eq: () => ({
+                            eq: async (_column: string, provider: string) => {
+                                rows.delete(provider);
+                                return { error: null };
+                            },
+                        }),
+                    }),
+                    select: () => ({
+                        eq: async () => ({ data: [...rows.values()], error: null }),
+                    }),
+                }),
+            } as never,
+        };
+    }
+
+    it("accepts the Bedrock and Azure providers", () => {
+        expect(normalizeApiKeyProvider("bedrock")).toBe("bedrock");
+        expect(normalizeApiKeyProvider("azure")).toBe("azure");
+    });
+
+    it("counts an environment key only when its region or endpoint is set too", () => {
+        process.env.AWS_BEARER_TOKEN_BEDROCK = "env-bedrock";
+        process.env.AZURE_API_KEY = "env-azure";
+        expect(hasEnvApiKey("bedrock")).toBe(false);
+        expect(hasEnvApiKey("azure")).toBe(false);
+
+        process.env.AWS_REGION = "us-west-2";
+        process.env.AZURE_RESOURCE_NAME = "contoso-openai";
+        expect(hasEnvApiKey("bedrock")).toBe(true);
+        expect(hasEnvApiKey("azure")).toBe(true);
+    });
+
+    it("saves the setting with the key and replaces the environment's pair", async () => {
+        process.env.AWS_BEARER_TOKEN_BEDROCK = "env-bedrock";
+        process.env.BEDROCK_AWS_REGION = "us-east-1";
+        const { db, rows } = memoryDb();
+
+        await expect(getUserApiKeys("user-1", db)).resolves.toMatchObject({
+            bedrock: "env-bedrock",
+            providerSettings: { bedrock: { region: "us-east-1" } },
+        });
+
+        await saveUserApiKey("user-1", "bedrock", "user-bedrock", db, {
+            bedrock: { region: "eu-west-2" },
+        });
+        expect(rows.get("bedrock")).toMatchObject({
+            settings: { region: "eu-west-2" },
+        });
+        expect(rows.get("bedrock")).not.toHaveProperty(
+            "encrypted_key",
+            "user-bedrock",
+        );
+
+        await expect(getUserApiKeys("user-1", db)).resolves.toMatchObject({
+            bedrock: "user-bedrock",
+            providerSettings: { bedrock: { region: "eu-west-2" } },
+        });
+        await expect(getUserApiKeyStatus("user-1", db)).resolves.toMatchObject({
+            bedrock: true,
+            sources: { bedrock: "user" },
+            settings: { bedrock: { region: "eu-west-2" } },
+        });
+    });
+
+    it("does not echo the deployment's endpoint back in status", async () => {
+        process.env.AZURE_API_KEY = "env-azure";
+        process.env.AZURE_OPENAI_ENDPOINT = "operator-openai";
+        const { db } = memoryDb();
+
+        const status = await getUserApiKeyStatus("user-1", db);
+        expect(status).toMatchObject({ azure: true, sources: { azure: "env" } });
+        expect(status.settings).toEqual({});
+    });
+
+    it("ignores a saved cloud key whose setting is missing or invalid", async () => {
+        const { db, rows } = memoryDb();
+        await saveUserApiKey("user-1", "azure", "user-azure", db, {
+            azure: { endpoint: "contoso-openai" },
+        });
+        rows.set("azure", {
+            ...rows.get("azure"),
+            settings: { endpoint: "https://attacker.example" },
+        });
+
+        await expect(getUserApiKeys("user-1", db)).resolves.toMatchObject({
+            azure: null,
+            providerSettings: { azure: null },
+        });
+        await expect(getUserApiKeyStatus("user-1", db)).resolves.toMatchObject({
+            azure: false,
+            sources: { azure: null },
+        });
+    });
+});

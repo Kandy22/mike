@@ -2,7 +2,13 @@ import crypto from "crypto";
 import { createServerSupabase } from "../../lib/supabase";
 import type { Db } from "../../lib/supabase";
 import { logError } from "../../lib/log";
-import type { UserApiKeys } from "../../lib/llm";
+import type { ProviderSettings, UserApiKeys } from "../../lib/llm";
+import {
+    envAzureCredentials,
+    envBedrockCredentials,
+    normalizeAwsRegion,
+    normalizeAzureEndpoint,
+} from "../../lib/llm/cloudProviders";
 
 export type ApiKeyProvider =
     | "claude"
@@ -12,10 +18,20 @@ export type ApiKeyProvider =
     | "openrouter"
     | "vercel"
     | "opencode-go"
+    | "bedrock"
+    | "azure"
     | "courtlistener";
 export type ApiKeySource = "user" | "env" | null;
+/** Providers whose key is only usable together with a non-secret setting. */
+export type SettingsApiKeyProvider = keyof ProviderSettings;
 export type ApiKeyStatus = Record<ApiKeyProvider, boolean> & {
     sources: Record<ApiKeyProvider, ApiKeySource>;
+    /**
+     * The settings saved with the user's own key. Deployment (env) settings
+     * are not echoed back: an operator's Azure resource is not the user's
+     * business.
+     */
+    settings: ProviderSettings;
 };
 
 type EncryptedKeyRow = {
@@ -23,6 +39,7 @@ type EncryptedKeyRow = {
     encrypted_key: string;
     iv: string;
     auth_tag: string;
+    settings?: unknown;
 };
 
 const PROVIDERS: ApiKeyProvider[] = [
@@ -33,8 +50,37 @@ const PROVIDERS: ApiKeyProvider[] = [
     "openrouter",
     "vercel",
     "opencode-go",
+    "bedrock",
+    "azure",
     "courtlistener",
 ];
+
+export function isSettingsApiKeyProvider(
+    provider: ApiKeyProvider,
+): provider is SettingsApiKeyProvider {
+    return provider === "bedrock" || provider === "azure";
+}
+
+/**
+ * Validate the setting a Bedrock or Azure key must be saved with
+ * ({ region } or { endpoint }) and return it as a one-entry ProviderSettings,
+ * or null when the value is missing or malformed.
+ */
+export function normalizeProviderSettings(
+    provider: SettingsApiKeyProvider,
+    value: unknown,
+): ProviderSettings | null {
+    const record =
+        value && typeof value === "object"
+            ? (value as Record<string, unknown>)
+            : {};
+    if (provider === "bedrock") {
+        const region = normalizeAwsRegion(record.region);
+        return region ? { bedrock: { region } } : null;
+    }
+    const endpoint = normalizeAzureEndpoint(record.endpoint);
+    return endpoint ? { azure: { endpoint } } : null;
+}
 
 function envApiKey(provider: ApiKeyProvider): string | null {
     switch (provider) {
@@ -60,6 +106,12 @@ function envApiKey(provider: ApiKeyProvider): string | null {
             );
         case "opencode-go":
             return process.env.OPENCODE_API_KEY?.trim() || null;
+        // A cloud key without its region/endpoint cannot be used, so the
+        // environment only counts as configured when both halves are set.
+        case "bedrock":
+            return envBedrockCredentials()?.apiKey ?? null;
+        case "azure":
+            return envAzureCredentials()?.apiKey ?? null;
         case "courtlistener":
             return process.env.COURTLISTENER_API_TOKEN?.trim() || null;
         default:
@@ -146,6 +198,8 @@ export async function getUserApiKeyStatus(
         openrouter: false,
         vercel: false,
         "opencode-go": false,
+        bedrock: false,
+        azure: false,
         courtlistener: false,
         sources: {
             claude: null,
@@ -155,8 +209,11 @@ export async function getUserApiKeyStatus(
             openrouter: null,
             vercel: null,
             "opencode-go": null,
+            bedrock: null,
+            azure: null,
             courtlistener: null,
         },
+        settings: {},
     };
 
     for (const provider of PROVIDERS) {
@@ -168,16 +225,22 @@ export async function getUserApiKeyStatus(
 
     const { data, error } = await db
         .from("user_api_keys")
-        .select("provider")
+        .select("provider, settings")
         .eq("user_id", userId);
     if (error) throw error;
 
     for (const row of data ?? []) {
         const provider = normalizeApiKeyProvider(String(row.provider));
-        if (provider) {
-            status[provider] = true;
-            status.sources[provider] = "user";
+        if (!provider) continue;
+        if (isSettingsApiKeyProvider(provider)) {
+            // A saved key without a valid setting cannot be used; report it
+            // as not configured rather than as a key that will fail later.
+            const settings = normalizeProviderSettings(provider, row.settings);
+            if (!settings) continue;
+            Object.assign(status.settings, settings);
         }
+        status[provider] = true;
+        status.sources[provider] = "user";
     }
 
     return status;
@@ -195,12 +258,21 @@ export async function getUserApiKeys(
         openrouter: envApiKey("openrouter"),
         vercel: envApiKey("vercel"),
         "opencode-go": envApiKey("opencode-go"),
+        bedrock: envApiKey("bedrock"),
+        azure: envApiKey("azure"),
         courtlistener: envApiKey("courtlistener"),
     };
+    const envBedrock = envBedrockCredentials();
+    const envAzure = envAzureCredentials();
+    const providerSettings: ProviderSettings = {
+        bedrock: envBedrock ? { region: envBedrock.region } : null,
+        azure: envAzure ? { endpoint: envAzure.endpoint } : null,
+    };
+    apiKeys.providerSettings = providerSettings;
 
     const { data, error } = await db
         .from("user_api_keys")
-        .select("provider, encrypted_key, iv, auth_tag")
+        .select("provider, encrypted_key, iv, auth_tag, settings")
         .eq("user_id", userId);
     if (error) throw error;
 
@@ -208,7 +280,15 @@ export async function getUserApiKeys(
         const provider = normalizeApiKeyProvider(row.provider);
         if (!provider) continue;
         const userKey = decrypt(row)?.trim() || null;
-        if (userKey) apiKeys[provider] = userKey;
+        if (!userKey) continue;
+        if (isSettingsApiKeyProvider(provider)) {
+            // The user's key replaces the environment's key AND setting, so
+            // it never runs against the operator's region or resource.
+            const settings = normalizeProviderSettings(provider, row.settings);
+            if (!settings) continue;
+            Object.assign(providerSettings, settings);
+        }
+        apiKeys[provider] = userKey;
     }
 
     return apiKeys;
@@ -219,6 +299,7 @@ export async function saveUserApiKey(
     provider: ApiKeyProvider,
     value: string | null,
     db: Db = createServerSupabase(),
+    settings: ProviderSettings = {},
 ): Promise<void> {
     const normalized = value?.trim() || null;
     if (!normalized) {
@@ -236,9 +317,35 @@ export async function saveUserApiKey(
             user_id: userId,
             provider,
             ...encrypt(normalized),
+            settings: isSettingsApiKeyProvider(provider)
+                ? (settings[provider] ?? null)
+                : null,
             updated_at: new Date().toISOString(),
         },
         { onConflict: "user_id,provider" },
     );
     if (error) throw error;
+}
+
+/**
+ * Change the setting saved with an existing Bedrock or Azure key without
+ * re-entering the key. Returns false when the user has no saved key for the
+ * provider.
+ */
+export async function updateUserApiKeySettings(
+    userId: string,
+    provider: SettingsApiKeyProvider,
+    settings: ProviderSettings,
+    db: Db = createServerSupabase(),
+): Promise<boolean> {
+    const value = settings[provider];
+    if (!value) throw new Error(`Missing ${provider} settings`);
+    const { data, error } = await db
+        .from("user_api_keys")
+        .update({ settings: value, updated_at: new Date().toISOString() })
+        .eq("user_id", userId)
+        .eq("provider", provider)
+        .select("provider");
+    if (error) throw error;
+    return (data ?? []).length > 0;
 }

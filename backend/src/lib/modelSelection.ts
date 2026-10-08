@@ -10,6 +10,7 @@ import {
     REASONING_LEVELS,
     type ReasoningLevel,
 } from "./llm";
+import { azureCredentials, bedrockCredentials } from "./llm/cloudProviders";
 import {
     apiKeyForConfiguredModel,
     configuredModelRequiresApiKey,
@@ -91,6 +92,8 @@ export function hasApiKeyForModel(
                 apiKeyForConfiguredModel(configured, apiKeys) !== null)
         );
     }
+    if (provider === "bedrock") return bedrockCredentials(apiKeys) !== null;
+    if (provider === "azure") return azureCredentials(apiKeys) !== null;
     return !!apiKeys[provider]?.trim();
 }
 
@@ -220,6 +223,8 @@ export function titleModelForChat(
         case "openrouter":
         case "vercel":
         case "opencode-go":
+        case "bedrock":
+        case "azure":
         case "ollama":
         case "openai-compatible":
             return resolvedChatModel;

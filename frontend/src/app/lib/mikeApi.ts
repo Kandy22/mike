@@ -744,6 +744,8 @@ export interface UserProfile {
     openRouterModels: string[];
     vercelModels: string[];
     openCodeGoModels: string[];
+    bedrockModels: string[];
+    azureModels: string[];
     apiKeyStatus: ApiKeyStatus;
 }
 
@@ -837,6 +839,8 @@ export async function updateUserProfile(payload: {
     openRouterModels?: string[];
     vercelModels?: string[];
     openCodeGoModels?: string[];
+    bedrockModels?: string[];
+    azureModels?: string[];
 }): Promise<UserProfile> {
     return apiRequest<UserProfile>("/user/profile", {
         method: "PATCH",
@@ -968,8 +972,19 @@ export type ApiKeyProvider =
     | "openrouter"
     | "vercel"
     | "opencode-go"
+    | "bedrock"
+    | "azure"
     | "courtlistener";
 type ApiKeySource = "user" | "env" | null;
+
+/**
+ * The non-secret setting saved with a user's own cloud-platform key: the AWS
+ * region of a Bedrock key, the Azure OpenAI resource of an Azure key.
+ */
+export type ApiKeySettings = {
+    bedrock?: { region: string } | null;
+    azure?: { endpoint: string } | null;
+};
 export type ApiKeyState = Record<
     ApiKeyProvider,
     {
@@ -980,6 +995,7 @@ export type ApiKeyState = Record<
 
 export type ApiKeyStatus = Record<ApiKeyProvider, boolean> & {
     sources?: Partial<Record<ApiKeyProvider, ApiKeySource>>;
+    settings?: ApiKeySettings;
 };
 
 export interface OllamaModelOption {
@@ -1042,14 +1058,21 @@ export async function getOpenCodeGoModels(): Promise<RouterCatalogModel[]> {
     return models;
 }
 
+/**
+ * Save, replace or remove a key. Bedrock and Azure keys also send their
+ * setting; a setting with a null key changes the saved key's setting only.
+ */
 export async function saveApiKey(
     provider: ApiKeyProvider,
     apiKey: string | null,
+    settings?: ApiKeySettings[keyof ApiKeySettings],
 ): Promise<ApiKeyStatus> {
     return apiRequest<ApiKeyStatus>(`/user/api-keys/${provider}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ api_key: apiKey }),
+        body: JSON.stringify(
+            settings ? { api_key: apiKey, settings } : { api_key: apiKey },
+        ),
     });
 }
 

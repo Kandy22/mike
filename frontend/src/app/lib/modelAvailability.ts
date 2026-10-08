@@ -13,6 +13,8 @@ export type ModelProvider =
     | "openrouter"
     | "vercel"
     | "opencode-go"
+    | "bedrock"
+    | "azure"
     | "ollama";
 
 export function getModelProvider(modelId: string): ModelProvider | null {
@@ -20,6 +22,8 @@ export function getModelProvider(modelId: string): ModelProvider | null {
     if (modelId.startsWith("openrouter/")) return "openrouter";
     if (modelId.startsWith("vercel/")) return "vercel";
     if (modelId.startsWith("opencode-go/")) return "opencode-go";
+    if (modelId.startsWith("bedrock/")) return "bedrock";
+    if (modelId.startsWith("azure/")) return "azure";
     const model = SETTINGS_MODELS.find((m) => m.id === canonicalModelId(modelId));
     if (!model) return null;
     return modelGroupToProvider(model.group);
@@ -51,6 +55,8 @@ export function providerLabel(provider: ModelProvider): string {
     if (provider === "openrouter") return "OpenRouter";
     if (provider === "vercel") return "Vercel AI Gateway";
     if (provider === "opencode-go") return "OpenCode Go";
+    if (provider === "bedrock") return "Amazon Bedrock";
+    if (provider === "azure") return "Azure OpenAI";
     if (provider === "ollama") return "Local (Ollama)";
     return "Google (Gemini)";
 }

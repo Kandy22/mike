@@ -111,6 +111,8 @@ function providerLabel(provider: Provider): string {
     if (provider === "openrouter") return "OpenRouter";
     if (provider === "vercel") return "Vercel AI Gateway";
     if (provider === "opencode-go") return "OpenCode Go";
+    if (provider === "bedrock") return "Amazon Bedrock";
+    if (provider === "azure") return "Azure OpenAI";
     if (provider === "ollama") return "Local (Ollama)";
     if (provider === "openai-compatible") return "Configured endpoint";
     return "Gemini";

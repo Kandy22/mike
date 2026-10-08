@@ -13,6 +13,8 @@ const routerModels = {
     openrouter: ["anthropic/claude-sonnet-4.5"],
     vercel: [],
     "opencode-go": ["glm-5"],
+    bedrock: [],
+    azure: [],
 };
 
 describe("titleModelForChat", () => {
@@ -32,6 +34,8 @@ describe("titleModelForChat", () => {
         "openrouter/anthropic/claude-sonnet-4.5",
         "vercel/openai/gpt-5.4",
         "opencode-go/glm-5",
+        "bedrock/us.anthropic.claude-opus-5-5",
+        "azure/gpt-6.1-sol",
         "ollama/llama3.2",
     ])("reuses dynamic model %s", (chatModel) => {
         expect(titleModelForChat(chatModel)).toBe(chatModel);
@@ -41,6 +45,31 @@ describe("titleModelForChat", () => {
         expect(titleModelForChat("gpt-6-astra", "claude-haiku-4-5")).toBe(
             "claude-haiku-4-5",
         );
+    });
+});
+
+describe("hasApiKeyForModel for cloud platforms", () => {
+    it("requires the region or endpoint saved with the key", () => {
+        expect(
+            hasApiKeyForModel("bedrock/anthropic.claude-opus-5-5", {
+                bedrock: "k",
+            }),
+        ).toBe(false);
+        expect(
+            hasApiKeyForModel("bedrock/anthropic.claude-opus-5-5", {
+                bedrock: "k",
+                providerSettings: { bedrock: { region: "us-east-1" } },
+            }),
+        ).toBe(true);
+        expect(hasApiKeyForModel("azure/gpt-6.1-sol", { azure: "k" })).toBe(
+            false,
+        );
+        expect(
+            hasApiKeyForModel("azure/gpt-6.1-sol", {
+                azure: "k",
+                providerSettings: { azure: { endpoint: "contoso-openai" } },
+            }),
+        ).toBe(true);
     });
 });
 

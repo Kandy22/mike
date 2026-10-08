@@ -385,10 +385,22 @@ userRouter.put(
 
         const apiKey =
             typeof req.body?.api_key === "string" ? req.body.api_key : null;
+        const settings =
+            req.body && typeof req.body === "object"
+                ? (req.body as { settings?: unknown }).settings
+                : undefined;
         const db = createServerSupabase();
-        const result = await saveApiKey(db, { userId, provider, apiKey });
+        const result = await saveApiKey(db, {
+            userId,
+            provider,
+            apiKey,
+            settings,
+        });
         if (!result.ok) {
-            return void sendInternalError(res, result.error);
+            if (result.kind === "save_failed") {
+                return void sendInternalError(res, result.error);
+            }
+            return void res.status(400).json({ detail: result.detail });
         }
         res.json(result.status);
     }),
