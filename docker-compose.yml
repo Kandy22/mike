@@ -170,6 +170,7 @@ services:
       - ./backend/migrations/20261006_01_user_response_style.sql:/user-response-style-migration.sql:ro
       - ./backend/migrations/20261007_01_add_mistral_user_api_key_provider.sql:/mistral-api-key-migration.sql:ro
       - ./backend/migrations/20261008_01_email_change_moves_grants.sql:/email-change-moves-grants-migration.sql:ro
+      - ./backend/migrations/20261008_02_document_version_textless_pages.sql:/textless-pages-migration.sql:ro
     entrypoint: ["bash", "-c"]
     command:
       - |
@@ -222,6 +223,7 @@ services:
         psql "$$DB" -v ON_ERROR_STOP=1 -f /user-response-style-migration.sql || exit 1;
         psql "$$DB" -v ON_ERROR_STOP=1 -f /mistral-api-key-migration.sql || exit 1;
         psql "$$DB" -v ON_ERROR_STOP=1 -f /email-change-moves-grants-migration.sql || exit 1;
+        psql "$$DB" -v ON_ERROR_STOP=1 -f /textless-pages-migration.sql || exit 1;
         psql "$$DB" -c "grant usage on schema public to service_role;
           grant all privileges on all tables in schema public to service_role;
           grant all privileges on all sequences in schema public to service_role;
