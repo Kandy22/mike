@@ -29,7 +29,7 @@ import {
   SettingsDescription,
   SettingsLabel,
 } from "@/app/components/settings/SettingsText";
-import { SettingsCard } from "@/app/components/settings/SettingsCard";
+import { GlassCardUI } from "@/shared/ui/GlassCardUI";
 import { SettingsHeading } from "@/app/components/settings/SettingsHeading";
 import { SettingsRow } from "@/app/components/settings/SettingsRow";
 import { SETTINGS_CONTROL_CLASS } from "@/app/components/settings/SettingsTextInput";
@@ -96,7 +96,7 @@ export default function ModelPreferencesPage() {
     <div className="space-y-8">
       <section className="space-y-3">
         <SettingsHeading>Model Preferences</SettingsHeading>
-        <SettingsCard>
+        <GlassCardUI>
           <SettingsRow layout="stacked">
             <div className="space-y-1">
               <SettingsLabel>Chat title generation</SettingsLabel>
@@ -178,7 +178,7 @@ export default function ModelPreferencesPage() {
               onChange={(id) => handleModelChange("memoryCuratorModel", id)}
             />
           </SettingsRow>
-        </SettingsCard>
+        </GlassCardUI>
       </section>
     </div>
   );

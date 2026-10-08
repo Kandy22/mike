@@ -1,9 +1,9 @@
 "use client";
 
-import type { Dispatch, SetStateAction } from "react";
+import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { Loader2 } from "lucide-react";
 import { can, roleFrom } from "@/app/lib/permissions";
-import type { OwnerGate } from "@/app/components/projects/ProjectWorkspace";
+import { SelectionActionsMenu } from "@/app/components/shared/SelectionActionsMenu";
 import {
     RowActionMenuItems,
     RowActions,
@@ -17,7 +17,7 @@ import {
     TableCell,
     TableEmptyState,
     TableFilters,
-    type TableFilterOption,
+    TableSortFilter,
     TableHeaderCell,
     TableHeaderRow,
     TablePrimaryCell,
@@ -29,24 +29,24 @@ import {
 } from "@/app/components/shared/TablePrimitive";
 import { EmptyState } from "@/app/components/ui/empty-state";
 import { PillButtonUI } from "@/shared/ui/PillButtonUI";
+import { cn } from "@/app/lib/utils";
 import { TabularReviewSkeuoIcon } from "@/app/components/shared/AppSidebarSkeuoIcons";
-import type { Document, TabularReview } from "@/app/components/shared/types";
-import { formatDate } from "./ProjectPageParts";
+import type { Project, TabularReview } from "@/app/components/shared/types";
+import { formatDate } from "@/app/components/projects/ProjectPageParts";
 import type {
     TabularReviewSortDirection,
     TabularReviewSortKey,
 } from "@/app/hooks/usePaginatedTabularReviews";
 
-const SORT_OPTIONS: TableFilterOption<TableSortDirection>[] = [
-    { value: "asc", label: "Ascending" },
-    { value: "desc", label: "Descending" },
-];
-
-export function ProjectReviewsTable({
-    docs,
+/**
+ * The tabular reviews list. Pass `projectColumn` on surfaces that list reviews
+ * across projects; a single project's list omits it.
+ */
+export function ReviewsListTable({
     reviews,
     selectedReviewIds,
-    creatingReview,
+    createDisabled,
+    emptyDescription,
     onCreateReview,
     onOpenReview,
     onOpenDetails,
@@ -57,7 +57,9 @@ export function ProjectReviewsTable({
     onToggleAll,
     selectingAll = false,
     deletingReviewIds,
-    hasActiveSearch,
+    hasActiveFilters,
+    projectColumn,
+    rowClassName,
     sort,
     onSortChange,
     hasMore,
@@ -67,22 +69,34 @@ export function ProjectReviewsTable({
     onLoadMore,
     onRetry,
     loading = false,
+    renderToolbar,
 }: {
-    docs: Document[];
     reviews: TabularReview[];
     selectedReviewIds: string[];
-    creatingReview: boolean;
+    createDisabled: boolean;
+    emptyDescription: string;
     onCreateReview: () => void;
-    onOpenReview: (reviewId: string) => void;
+    onOpenReview: (review: TabularReview) => void;
     onOpenDetails: (review: TabularReview) => void;
     onDeleteReview: (review: TabularReview) => Promise<void> | void;
     onDeleteSelectedReviews: () => Promise<void> | void;
-    onOwnerOnlyAction: (gate: OwnerGate) => void;
+    onOwnerOnlyAction: (
+        gate: { action: string; requiredRole: "owner" | "editor" },
+        review: TabularReview,
+    ) => void;
     setSelectedReviewIds: Dispatch<SetStateAction<string[]>>;
     onToggleAll: () => void;
     selectingAll?: boolean;
     deletingReviewIds: ReadonlySet<string>;
-    hasActiveSearch: boolean;
+    /** A search, scope or filter is narrowing the list. */
+    hasActiveFilters: boolean;
+    projectColumn?: {
+        projects: Project[];
+        filter: string | null;
+        onFilterChange: (projectId: string | null) => void;
+    };
+    /** Applied to the header and every row, for the host's gutter. */
+    rowClassName?: string;
     sort: {
         key: TabularReviewSortKey;
         direction: TabularReviewSortDirection;
@@ -98,9 +112,39 @@ export function ProjectReviewsTable({
     onLoadMore: () => void;
     onRetry: () => void;
     loading?: boolean;
+    renderToolbar?: (actions: ReactNode) => ReactNode;
 }) {
     function clearSelection() {
         setSelectedReviewIds([]);
+    }
+
+    function requestReviewDetails(review: TabularReview) {
+        if (!can(roleFrom(review), "content.edit")) {
+            onOwnerOnlyAction({ action: "edit tabular review details", requiredRole: "editor" }, review);
+            return;
+        }
+        onOpenDetails(review);
+    }
+
+    function renderReviewActions(review: TabularReview | undefined, onClose: () => void) {
+        const actionIds = review
+            ? rowActionSelectionIds(review.id, selectedReviewIds)
+            : selectedReviewIds;
+        const appliesToSelection = actionIds.length > 1;
+        return (
+            <RowActionMenuItems
+                onClose={onClose}
+                onView={!appliesToSelection && review ? () => onOpenReview(review) : undefined}
+                viewLabel="Open"
+                onEditDetails={!appliesToSelection && review ? () => requestReviewDetails(review) : undefined}
+                onDelete={() =>
+                    appliesToSelection || !review
+                        ? onDeleteSelectedReviews()
+                        : onDeleteReview(review)
+                }
+                deleteLabel={appliesToSelection ? `Delete ${actionIds.length} reviews` : undefined}
+            />
+        );
     }
 
     function handleSortChange(
@@ -111,14 +155,15 @@ export function ProjectReviewsTable({
         clearSelection();
     }
 
-    const visibleReviews = reviews;
-
     const allVisibleReviewsSelected =
-        visibleReviews.length > 0 &&
-        visibleReviews.every((review) => selectedReviewIds.includes(review.id));
+        reviews.length > 0 &&
+        reviews.every((review) => selectedReviewIds.includes(review.id));
     const someVisibleReviewsSelected =
         !allVisibleReviewsSelected &&
-        visibleReviews.some((review) => selectedReviewIds.includes(review.id));
+        reviews.some((review) => selectedReviewIds.includes(review.id));
+    const projectNameById = new Map(
+        projectColumn?.projects.map((project) => [project.id, project.name]),
+    );
     const nameSortDirection = sort?.key === "name" ? sort.direction : null;
     const columnsSortDirection =
         sort?.key === "columns" ? sort.direction : null;
@@ -127,48 +172,42 @@ export function ProjectReviewsTable({
     const createdSortDirection =
         sort?.key === "created" ? sort.direction : null;
     const nameFilterButton = (
-        <TableFilters
+        <TableSortFilter
             label="Sort by review name"
             value={nameSortDirection}
-            allLabel="Default Order"
-            widthClassName="w-40"
             align="right"
-            options={SORT_OPTIONS}
             onChange={(direction) => handleSortChange("name", direction)}
         />
     );
     const columnsFilterButton = (
-        <TableFilters
+        <TableSortFilter
             label="Sort by columns"
             value={columnsSortDirection}
-            allLabel="Default Order"
-            widthClassName="w-40"
-            options={SORT_OPTIONS}
             onChange={(direction) => handleSortChange("columns", direction)}
         />
     );
     const documentsFilterButton = (
-        <TableFilters
+        <TableSortFilter
             label="Sort by documents"
             value={documentsSortDirection}
-            allLabel="Default Order"
-            widthClassName="w-40"
-            options={SORT_OPTIONS}
             onChange={(direction) => handleSortChange("documents", direction)}
         />
     );
     const createdFilterButton = (
-        <TableFilters
+        <TableSortFilter
             label="Sort by created date"
             value={createdSortDirection}
-            allLabel="Default Order"
-            widthClassName="w-40"
-            options={SORT_OPTIONS}
             onChange={(direction) => handleSortChange("created", direction)}
         />
     );
 
     return (
+        <>
+        {renderToolbar?.(selectedReviewIds.length > 0 ? (
+            <SelectionActionsMenu
+                renderItems={(close) => renderReviewActions(reviews.find((review) => review.id === selectedReviewIds[0]), close)}
+            />
+        ) : undefined)}
         <TableScrollArea
             onScroll={(event) => {
                 if (loading || loadingMore || !hasMore) return;
@@ -180,7 +219,7 @@ export function ProjectReviewsTable({
                 if (distanceToBottom < 200) onLoadMore();
             }}
             header={
-                <TableHeaderRow className="pr-8 md:pr-8">
+                <TableHeaderRow className={rowClassName}>
                     <TableStickyCell header>
                         {loading ? (
                             <SkeletonCheckbox />
@@ -198,6 +237,7 @@ export function ProjectReviewsTable({
                                 }}
                                 onChange={onToggleAll}
                                 className={TABLE_CHECKBOX_CLASS}
+                                aria-label="Select all reviews"
                             />
                         )}
                         <span className="mr-1">Name</span>
@@ -215,6 +255,27 @@ export function ProjectReviewsTable({
                             {!loading && documentsFilterButton}
                         </div>
                     </TableHeaderCell>
+                    {projectColumn && (
+                        <TableHeaderCell className="w-52">
+                            <div className="flex items-center gap-1">
+                                <span>Project</span>
+                                {!loading && (
+                                    <TableFilters
+                                        label="Filter by project"
+                                        value={projectColumn.filter}
+                                        allLabel="All Projects"
+                                        options={projectColumn.projects.map(
+                                            (project) => ({
+                                                value: project.id,
+                                                label: project.name,
+                                            }),
+                                        )}
+                                        onChange={projectColumn.onFilterChange}
+                                    />
+                                )}
+                            </div>
+                        </TableHeaderCell>
+                    )}
                     <TableHeaderCell className="w-32">
                         <div className="flex items-center gap-1">
                             <span>Created</span>
@@ -226,7 +287,10 @@ export function ProjectReviewsTable({
             }
         >
             {loading ? (
-                <ProjectReviewsLoadingRows />
+                <ReviewsLoadingRows
+                    showProject={!!projectColumn}
+                    rowClassName={rowClassName}
+                />
             ) : error ? (
                 <TableEmptyState>
                     <p className="text-lg font-medium font-serif text-gray-900">
@@ -246,7 +310,7 @@ export function ProjectReviewsTable({
                 </TableEmptyState>
             ) : reviews.length === 0 ? (
                 <TableEmptyState>
-                    {hasActiveSearch ? (
+                    {hasActiveFilters ? (
                         <p className="text-sm text-gray-400">
                             No reviews found
                         </p>
@@ -254,15 +318,13 @@ export function ProjectReviewsTable({
                         <EmptyState
                             icon={<TabularReviewSkeuoIcon />}
                             title="Tabular Reviews"
-                            description="Extract data from project documents into tables using AI."
+                            description={emptyDescription}
                             action={
                                 <PillButtonUI
                                     tone="black"
                                     size="sm"
                                     onClick={onCreateReview}
-                                    disabled={
-                                        creatingReview || docs.length === 0
-                                    }
+                                    disabled={createDisabled}
                                 >
                                     Create
                                 </PillButtonUI>
@@ -272,13 +334,8 @@ export function ProjectReviewsTable({
                 </TableEmptyState>
             ) : (
                 <TableBody>
-                    {visibleReviews.map((review) => {
+                    {reviews.map((review) => {
                         const deleting = deletingReviewIds.has(review.id);
-                        const actionIds = rowActionSelectionIds(
-                            review.id,
-                            selectedReviewIds,
-                        );
-                        const appliesToSelection = actionIds.length > 1;
                         return (
                             <TableRow
                                 key={review.id}
@@ -287,68 +344,17 @@ export function ProjectReviewsTable({
                                     !deleting &&
                                     selectedReviewIds.includes(review.id)
                                 }
-                                rightClickDropdown={
-                                    deleting
-                                        ? undefined
-                                        : (close) => (
-                                              <RowActionMenuItems
-                                                  onClose={close}
-                                                  onView={
-                                                      appliesToSelection
-                                                          ? undefined
-                                                          : () =>
-                                                                onOpenReview(
-                                                                    review.id,
-                                                                )
-                                                  }
-                                                  viewLabel="Open"
-                                                  onEditDetails={
-                                                      appliesToSelection
-                                                          ? undefined
-                                                          : () => {
-                                                                if (
-                                                                    !can(
-                                                                        roleFrom(
-                                                                            review,
-                                                                        ),
-                                                                        "content.edit",
-                                                                    )
-                                                                ) {
-                                                                    onOwnerOnlyAction(
-                                                                        {
-                                                                            action: "edit tabular review details",
-                                                                            requiredRole:
-                                                                                "editor",
-                                                                        },
-                                                                    );
-                                                                    return;
-                                                                }
-                                                                onOpenDetails(review);
-                                                            }
-                                                  }
-                                                  onDelete={() =>
-                                                      appliesToSelection
-                                                          ? onDeleteSelectedReviews()
-                                                          : onDeleteReview(review)
-                                                  }
-                                                  deleteLabel={
-                                                      appliesToSelection
-                                                          ? `Delete ${actionIds.length} reviews`
-                                                          : undefined
-                                                  }
-                                              />
-                                          )
-                                }
+                                rightClickDropdown={deleting ? undefined : (close) => renderReviewActions(review, close)}
                                 onClick={
                                     deleting
                                         ? undefined
-                                        : () => onOpenReview(review.id)
+                                        : () => onOpenReview(review)
                                 }
-                                className={
-                                    deleting
-                                        ? "pointer-events-none pr-8 opacity-50 md:pr-8"
-                                        : "pr-8 md:pr-8"
-                                }
+                                className={cn(
+                                    rowClassName,
+                                    deleting &&
+                                        "pointer-events-none opacity-50",
+                                )}
                             >
                                 <TablePrimaryCell
                                     selected={
@@ -377,6 +383,18 @@ export function ProjectReviewsTable({
                                 <TableCell className="w-24">
                                     {review.document_count ?? 0}
                                 </TableCell>
+                                {projectColumn && (
+                                    <TableCell className="w-52 pr-2">
+                                        {(review.project_id &&
+                                            projectNameById.get(
+                                                review.project_id,
+                                            )) || (
+                                            <span className="text-gray-300">
+                                                —
+                                            </span>
+                                        )}
+                                    </TableCell>
+                                )}
                                 <TableCell className="w-32">
                                     {review.created_at ? (
                                         formatDate(review.created_at)
@@ -389,25 +407,9 @@ export function ProjectReviewsTable({
                                     onClick={(e) => e.stopPropagation()}
                                 >
                                     <RowActions
-                                        onView={() =>
-                                            onOpenReview(review.id)
-                                        }
+                                        onView={() => onOpenReview(review)}
                                         viewLabel="Open"
-                                        onEditDetails={() => {
-                                            if (
-                                                !can(
-                                                    roleFrom(review),
-                                                    "content.edit",
-                                                )
-                                            ) {
-                                                onOwnerOnlyAction({
-                                                    action: "edit tabular review details",
-                                                    requiredRole: "editor",
-                                                });
-                                                return;
-                                            }
-                                            onOpenDetails(review);
-                                        }}
+                                        onEditDetails={() => requestReviewDetails(review)}
                                         onDelete={() => onDeleteReview(review)}
                                     />
                                 </div>
@@ -425,16 +427,23 @@ export function ProjectReviewsTable({
                 onLoadMore={onLoadMore}
             />
         </TableScrollArea>
+        </>
     );
 }
 
-function ProjectReviewsLoadingRows() {
+function ReviewsLoadingRows({
+    showProject,
+    rowClassName,
+}: {
+    showProject: boolean;
+    rowClassName?: string;
+}) {
     const titleWidths = ["w-36", "w-40", "w-44", "w-48", "w-52"];
 
     return (
         <TableBody>
             {[1, 2, 3, 4, 5].map((i) => (
-                <TableRow key={i} interactive={false} className="pr-8 md:pr-8">
+                <TableRow key={i} interactive={false} className={rowClassName}>
                     <TableStickyCell hover={false}>
                         <div className="flex min-w-0 items-center">
                             <SkeletonCheckbox />
@@ -449,6 +458,11 @@ function ProjectReviewsLoadingRows() {
                     <TableCell className="w-24">
                         <SkeletonLine className="w-8" />
                     </TableCell>
+                    {showProject && (
+                        <TableCell className="w-52">
+                            <SkeletonLine className="w-24" />
+                        </TableCell>
+                    )}
                     <TableCell className="w-32">
                         <SkeletonLine className="w-20" />
                     </TableCell>

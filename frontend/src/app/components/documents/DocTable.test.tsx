@@ -84,13 +84,6 @@ function Harness({
             <output data-testid="documents-state">
                 {JSON.stringify(documents)}
             </output>
-            <button
-                type="button"
-                disabled={!selectionActions}
-                onClick={() => void selectionActions?.onRemoveFromFolder()}
-            >
-                Remove selected
-            </button>
             {selectionActions && (
                 <SelectionActionsMenu renderItems={selectionActions.renderMenuItems} />
             )}
@@ -217,7 +210,8 @@ describe("DocTable remove-from-folder failures", () => {
 
         await user.click(screen.getByLabelText("Select One.pdf"));
         await user.click(screen.getByLabelText("Select Two.pdf"));
-        await user.click(screen.getByRole("button", { name: "Remove selected" }));
+        await user.click(screen.getByRole("button", { name: "Actions" }));
+        await user.click(screen.getByRole("menuitem", { name: "Remove from subfolder" }));
 
         expect(
             await screen.findByText(
@@ -230,5 +224,37 @@ describe("DocTable remove-from-folder failures", () => {
             ),
         );
         expect(tableOperations.refreshCollection).toHaveBeenCalledOnce();
+    });
+});
+
+describe("DocTable empty state", () => {
+    it("offers the secondary action beside Upload without opening the upload picker", async () => {
+        const onClick = vi.fn();
+        const openUpload = vi.fn();
+        render(
+            <DocTable
+                scopeKey="templates"
+                documents={[]}
+                setDocuments={vi.fn()}
+                folders={[]}
+                setFolders={vi.fn()}
+                loading={false}
+                search=""
+                operations={operations(vi.fn())}
+                emptyStateTitle="Templates"
+                emptyStateSecondaryAction={{ label: "Presets", onClick }}
+                renderAddDocumentsModal={(open) => {
+                    if (open) openUpload();
+                    return null;
+                }}
+                canDo={allowAll}
+            />,
+        );
+
+        expect(screen.getByRole("button", { name: "Upload" })).toBeVisible();
+        await userEvent.click(screen.getByRole("button", { name: "Presets" }));
+
+        expect(onClick).toHaveBeenCalledTimes(1);
+        expect(openUpload).not.toHaveBeenCalled();
     });
 });

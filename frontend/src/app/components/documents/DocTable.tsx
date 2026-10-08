@@ -112,6 +112,7 @@ import {
     selectionAnchorAfterRowSelection,
     selectionRangeIds,
     TableFilters,
+    TableSortFilter,
     TableHeaderCell,
     TableHeaderRow,
     TableEmptyState,
@@ -141,11 +142,6 @@ function SelectionMenuItems({ render }: { render: () => ReactNode }) {
 
 export interface DocTableSelectionActions {
     renderMenuItems: (onClose?: () => void) => ReactNode;
-    selectedCount: number;
-    hasDocumentsInFolders: boolean;
-    onDownload: () => Promise<void>;
-    onRemoveFromFolder: () => Promise<void>;
-    onDelete: () => Promise<void>;
 }
 
 export type DocumentSortKey = "name" | "size" | "version" | "created" | "updated";
@@ -160,11 +156,6 @@ export interface DocTableQuery {
     fileType: string | null;
     sort: DocumentSort | null;
 }
-
-const SORT_OPTIONS: TableFilterOption<TableSortDirection>[] = [
-    { value: "asc", label: "Ascending" },
-    { value: "desc", label: "Descending" },
-];
 
 const SORT_KEY_LABELS: Record<DocumentSortKey, string> = {
     name: "Name",
@@ -214,6 +205,8 @@ interface DocTableProps {
     search: string;
     operations: DocTableOperations;
     emptyStateTitle: string;
+    /** A second way to fill an empty collection, offered beside Upload. */
+    emptyStateSecondaryAction?: { label: string; onClick: () => void };
     renderAddDocumentsModal?: (
         open: boolean,
         onClose: () => void,
@@ -393,6 +386,7 @@ export function DocTable({
     search,
     operations,
     emptyStateTitle,
+    emptyStateSecondaryAction,
     renderAddDocumentsModal,
     onAddDocumentsActionChange,
     onUploadFilesActionChange,
@@ -3351,7 +3345,6 @@ export function DocTable({
         docs,
         documents,
         operations,
-        selectedDocIds,
         setDocuments,
         setOwnerOnlyAction,
     ]);
@@ -3616,13 +3609,11 @@ export function DocTable({
         ? `Default (${SORT_KEY_LABELS[defaultSort.key]})`
         : "Default Order";
     const nameFilterButton = enableHeaderFilters ? (
-        <TableFilters
+        <TableSortFilter
             label="Sort by name"
             value={nameSortDirection}
             allLabel={resetSortLabel}
-            widthClassName="w-40"
             align="right"
-            options={SORT_OPTIONS}
             onChange={(direction) => handleSortChange("name", direction)}
         />
     ) : null;
@@ -3637,42 +3628,34 @@ export function DocTable({
         />
     ) : null;
     const sizeFilterButton = enableHeaderFilters ? (
-        <TableFilters
+        <TableSortFilter
             label="Sort by size"
             value={sizeSortDirection}
             allLabel={resetSortLabel}
-            widthClassName="w-40"
-            options={SORT_OPTIONS}
             onChange={(direction) => handleSortChange("size", direction)}
         />
     ) : null;
     const versionFilterButton = enableHeaderFilters ? (
-        <TableFilters
+        <TableSortFilter
             label="Sort by version"
             value={versionSortDirection}
             allLabel={resetSortLabel}
-            widthClassName="w-40"
-            options={SORT_OPTIONS}
             onChange={(direction) => handleSortChange("version", direction)}
         />
     ) : null;
     const createdFilterButton = enableHeaderFilters ? (
-        <TableFilters
+        <TableSortFilter
             label="Sort by created date"
             value={createdSortDirection}
             allLabel={resetSortLabel}
-            widthClassName="w-40"
-            options={SORT_OPTIONS}
             onChange={(direction) => handleSortChange("created", direction)}
         />
     ) : null;
     const updatedFilterButton = enableHeaderFilters ? (
-        <TableFilters
+        <TableSortFilter
             label="Sort by updated date"
             value={updatedSortDirection}
             allLabel={resetSortLabel}
-            widthClassName="w-40"
-            options={SORT_OPTIONS}
             onChange={(direction) => handleSortChange("updated", direction)}
         />
     ) : null;
@@ -3909,64 +3892,29 @@ export function DocTable({
                 onDeselect={
                     menuDocIsSelected ? clearCollectionSelection : undefined
                 }
-                onView={
-                    menuAppliesToSelection
-                        ? undefined
-                        : () => {
-                              setViewingDocVersion(null);
-                              setViewingDoc(menuDoc);
-                          }
-                }
-                onRename={
-                    menuAppliesToSelection
-                        ? undefined
-                        : () => {
-                              setRenameDocumentValue(menuDoc.filename);
-                              setRenamingDocumentId(menuDoc.id);
-                          }
-                }
+                onView={() => {
+                    setViewingDocVersion(null);
+                    setViewingDoc(menuDoc);
+                }}
+                onRename={() => {
+                    setRenameDocumentValue(menuDoc.filename);
+                    setRenamingDocumentId(menuDoc.id);
+                }}
                 renameLabel="Rename document"
-                onDownload={() =>
-                    menuAppliesToSelection
-                        ? handleDownloadSelectedDocs()
-                        : downloadDoc(menuDoc.id)
-                }
+                onDownload={() => downloadDoc(menuDoc.id)}
                 onShowAllVersions={
-                    !menuAppliesToSelection &&
-                    menuDocHasVersions &&
-                    !menuDocVersionsOpen
+                    menuDocHasVersions && !menuDocVersionsOpen
                         ? () => void toggleVersions(menuDoc.id)
                         : undefined
                 }
-                onUploadNewVersion={
-                    menuAppliesToSelection
-                        ? undefined
-                        : () => void handleUploadNewVersion(menuDoc)
-                }
+                onUploadNewVersion={() => void handleUploadNewVersion(menuDoc)}
                 onRemoveFromFolder={
-                    menuAppliesToSelection
-                        ? selectedStandaloneDocIds.some(
-                              (id) => docs.find((doc) => doc.id === id)?.folder_id,
-                          )
-                            ? () => void handleRemoveSelectedFromFolder()
-                            : undefined
-                        : menuDoc.folder_id
-                          ? () => void handleRemoveDocFromFolder(menuDoc.id)
-                          : undefined
-                }
-                onDelete={() =>
-                    menuAppliesToSelection
-                        ? requestDeleteSelectedItems()
-                        : requestRemoveDoc(menuDoc)
-                }
-                deleteLabel={
-                    menuAppliesToSelection
-                        ? `Delete ${selectedItemCount} items`
+                    menuDoc.folder_id
+                        ? () => void handleRemoveDocFromFolder(menuDoc.id)
                         : undefined
                 }
-                deleteDisabled={
-                    !menuAppliesToSelection && !canDeleteDocument(menuDoc)
-                }
+                onDelete={() => requestRemoveDoc(menuDoc)}
+                deleteDisabled={!canDeleteDocument(menuDoc)}
             />
         ) : (
             <RowActionMenuItems
@@ -3975,53 +3923,28 @@ export function DocTable({
                     menuFolderIsSelected ? clearCollectionSelection : undefined
                 }
                 onView={
-                    !menuFolderAppliesToSelection && showFolderActions && folderId
+                    showFolderActions && folderId
                         ? () => openFolderView(folderId!)
                         : undefined
                 }
                 viewLabel="Open"
-                onDownload={
-                    menuFolderAppliesToSelection
-                        ? handleDownloadSelectedDocs
-                        : undefined
-                }
                 newSubfolderDisabled={!allowed("docs.organize")}
-                onNewSubfolder={
-                    menuFolderAppliesToSelection
-                        ? undefined
-                        : () => {
-                              // The name prompt itself is
-                              // only offered to a role
-                              // that may create the
-                              // folder; the submit gate
-                              // in handleCreateFolder
-                              // stays as the backstop.
-                              if (
-                                  !requireCapability(
-                                      "docs.organize",
-                                      "create folders",
-                                      "editor",
-                                  )
-                              )
-                                  return;
-                              setCreatingFolderIn(folderId ?? null);
-                              setNewFolderName("");
-                              if (folderId) {
-                                  const wasExpanded =
-                                      expandedFolderIds.has(folderId);
-                                  if (!wasExpanded)
-                                      void expandFolderChildren(folderId);
-                                  setExpandedFolderIds(
-                                      (prev) => new Set([...prev, folderId!]),
-                                  );
-                              }
-                          }
-                }
+                onNewSubfolder={() => {
+                    // Gate the prompt as well as submission in handleCreateFolder.
+                    if (!requireCapability("docs.organize", "create folders", "editor")) return;
+                    setCreatingFolderIn(folderId ?? null);
+                    setNewFolderName("");
+                    if (folderId) {
+                        if (!expandedFolderIds.has(folderId))
+                            void expandFolderChildren(folderId);
+                        setExpandedFolderIds((prev) => new Set([...prev, folderId]));
+                    }
+                }}
                 newSubfolderLabel={
                     showFolderActions ? "New subfolder inside" : "New subfolder"
                 }
                 onRename={
-                    !menuFolderAppliesToSelection && showFolderActions && folderId
+                    showFolderActions && folderId
                         ? () => {
                               const f = folders.find((x) => x.id === folderId);
                               setRenameFolderValue(f?.name ?? "");
@@ -4031,17 +3954,11 @@ export function DocTable({
                 }
                 renameLabel="Rename folder"
                 onDelete={
-                    menuFolderAppliesToSelection
-                        ? requestDeleteSelectedItems
-                        : showFolderActions && folderId
-                          ? () => requestDeleteFolder(folderId!)
-                          : undefined
+                    showFolderActions && folderId
+                        ? () => requestDeleteFolder(folderId!)
+                        : undefined
                 }
-                deleteLabel={
-                    menuFolderAppliesToSelection
-                        ? `Delete ${selectedItemCount} items`
-                        : "Delete folder"
-                }
+                deleteLabel="Delete folder"
             />
         );
     };
@@ -4062,19 +3979,8 @@ export function DocTable({
                     onClose,
                 )} />
             ),
-            selectedCount: selectedItemCount,
-            hasDocumentsInFolders: selectedStandaloneDocIds.some(
-                (id) => docs.find((d) => d.id === id)?.folder_id != null,
-            ),
-            onDownload: handleDownloadSelectedDocs,
-            onRemoveFromFolder: handleRemoveSelectedFromFolder,
-            onDelete: async () => requestDeleteSelectedItems(),
         };
     }, [
-        docs,
-        handleDownloadSelectedDocs,
-        handleRemoveSelectedFromFolder,
-        requestDeleteSelectedItems,
         selectedItemCount,
         selectedStandaloneDocIds,
         selectedFolderIds,
@@ -4427,39 +4333,53 @@ export function DocTable({
                                                 title={emptyStateTitle}
                                                 description="Upload documents or drop files and folders here"
                                                 action={
-                                                    <PillButtonUI
-                                                        tone="black"
-                                                        size="sm"
-                                                        // Uploading here is
-                                                        // editor-tier, and the
-                                                        // empty state was the
-                                                        // one Upload that
-                                                        // still looked live to
-                                                        // a viewer.
-                                                        disabled={
-                                                            !allowed(
-                                                                "content.edit",
-                                                            )
-                                                        }
-                                                        aria-disabled={
-                                                            !allowed(
-                                                                "content.edit",
-                                                            ) || undefined
-                                                        }
-                                                        title={
-                                                            allowed(
-                                                                "content.edit",
-                                                            )
-                                                                ? undefined
-                                                                : "Only an editor can add documents"
-                                                        }
-                                                        onClick={(event) => {
-                                                            event.stopPropagation();
-                                                            openAddDocuments();
-                                                        }}
-                                                    >
-                                                        Upload
-                                                    </PillButtonUI>
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        <PillButtonUI
+                                                            tone="black"
+                                                            size="sm"
+                                                            // Uploading here is
+                                                            // editor-tier, and the
+                                                            // empty state was the
+                                                            // one Upload that
+                                                            // still looked live to
+                                                            // a viewer.
+                                                            disabled={
+                                                                !allowed(
+                                                                    "content.edit",
+                                                                )
+                                                            }
+                                                            aria-disabled={
+                                                                !allowed(
+                                                                    "content.edit",
+                                                                ) || undefined
+                                                            }
+                                                            title={
+                                                                allowed(
+                                                                    "content.edit",
+                                                                )
+                                                                    ? undefined
+                                                                    : "Only an editor can add documents"
+                                                            }
+                                                            onClick={(event) => {
+                                                                event.stopPropagation();
+                                                                openAddDocuments();
+                                                            }}
+                                                        >
+                                                            Upload
+                                                        </PillButtonUI>
+                                                        {emptyStateSecondaryAction && (
+                                                            <PillButtonUI
+                                                                tone="white"
+                                                                size="sm"
+                                                                onClick={(event) => {
+                                                                    event.stopPropagation();
+                                                                    emptyStateSecondaryAction.onClick();
+                                                                }}
+                                                            >
+                                                                {emptyStateSecondaryAction.label}
+                                                            </PillButtonUI>
+                                                        )}
+                                                    </div>
                                                 }
                                             />
                                         </TableEmptyState>
