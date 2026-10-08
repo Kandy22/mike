@@ -52,11 +52,15 @@ const ALWAYS_REASONING_LEVELS: readonly ReasoningLevel[] =
 export function reasoningLevelsForModel(
     model: string,
 ): readonly ReasoningLevel[] {
-    const catalogId = model
-        .replace(/^(?:openrouter|vercel)\//, "")
-        // Bedrock names Claude "anthropic.claude-…", optionally behind a
-        // cross-region inference-profile prefix ("us.anthropic.claude-…").
-        .replace(/^bedrock\/(?:[a-z]+\.)?anthropic\./, "");
+    const catalogId = model.startsWith("bedrock/")
+        ? // Bedrock names Claude "anthropic.claude-…", optionally behind a
+          // cross-region inference-profile prefix ("us.", "us-gov.") or at
+          // the end of an inference-profile ARN, after its last "/".
+          model
+              .split("/")
+              .at(-1)!
+              .replace(/^(?:[a-z]+(?:-[a-z]+)*\.)?anthropic\./, "")
+        : model.replace(/^(?:openrouter|vercel)\//, "");
     // Astra, Sol 6.1, and current Fable/Opus cannot disable thinking.
     if (
         /(?:^|\/)(?:gpt-6-astra|gpt-6\.1-sol|claude-fable-5-1|claude-opus-5-5)(?:$|-)/.test(
