@@ -108,12 +108,11 @@ test("rename chat: sidebar rename interaction updates the title", async ({ page 
     const titleGenerated = page
         .waitForResponse(
             (r) =>
-                /^\/api\/chat\/[^/]+\/generate-title$/.test(
-                    new URL(r.url()).pathname,
-                ) &&
+                new URL(r.url()).pathname === "/api/chat" &&
                 r.request().method() === "POST",
             { timeout: 30_000 },
         )
+        .then((r) => r.finished())
         .catch(() => null);
     await textarea.press("Enter");
 
@@ -198,12 +197,11 @@ test("delete chat: sidebar delete action removes the chat from history", async (
     const titleGenerated = page
         .waitForResponse(
             (r) =>
-                /^\/api\/chat\/[^/]+\/generate-title$/.test(
-                    new URL(r.url()).pathname,
-                ) &&
+                new URL(r.url()).pathname === "/api/chat" &&
                 r.request().method() === "POST",
             { timeout: 30_000 },
         )
+        .then((r) => r.finished())
         .catch(() => null);
 
     // Pick a Claude model (available via the backend's ANTHROPIC_API_KEY) so

@@ -250,7 +250,6 @@ app.post("/projects/:projectId/chat", chatLimiter);
 app.post("/tabular-review/:reviewId/chat", chatLimiter);
 app.post("/tabular-review/:reviewId/generate", chatLimiter);
 app.post("/chat/create", chatCreateLimiter);
-app.post("/chat/:chatId/generate-title", chatCreateLimiter);
 app.post("/workflow-addons/:addonId/import", workflowImportLimiter);
 const legacyUploadRemoved = (_req: express.Request, res: express.Response) => {
   res.status(410).json({
