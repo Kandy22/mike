@@ -13,15 +13,18 @@ import {
     useState,
 } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, Plus } from "lucide-react";
+import { BookOpen, ChevronLeft, Plus } from "lucide-react";
 import { DocTable } from "@/app/components/documents/DocTable";
 import { NO_ROLE_MODEL } from "@/app/lib/permissions";
 import type {
   DocTableFolderBreadcrumb,
   DocTableFolder,
   DocTableQuery,
+  DocTableSelectionActions,
 } from "@/app/components/documents/DocTable";
+import { HeaderActionsMenu } from "@/app/components/shared/HeaderActionsMenu";
 import { PageHeader } from "@/app/components/shared/PageHeader";
+import { SelectionActionsMenu } from "@/app/components/shared/SelectionActionsMenu";
 import { TableToolbar } from "@/app/components/shared/TableToolbar";
 import { DocumentUploadMenu } from "@/app/components/shared/DocumentUploadMenu";
 import { TabPillButtonUI } from "@/shared/ui/TabPillButtonUI";
@@ -103,7 +106,7 @@ function libraryLevelKey(parentId: string | null): string {
 const LibraryWorkspaceContext =
     createContext<LibraryWorkspaceContextValue | null>(null);
 
-function useLibraryWorkspace() {
+export function useLibraryWorkspace() {
     const context = useContext(LibraryWorkspaceContext);
     if (!context) {
         throw new Error(
@@ -522,6 +525,7 @@ export function LibraryCollectionPage({
     const collectionRootPath = kind === "files" ? "/library" : "/library/templates";
   const debouncedSearch = useDebouncedValue(search, 250);
     const title = kind === "files" ? "Documents" : "Templates";
+    const [selectionActions, setSelectionActions] = useState<DocTableSelectionActions | null>(null);
   const [documentTypeOptions, setDocumentTypeOptions] = useState<string[]>([]);
   const [tableQuery, setTableQuery] = useState<DocTableQuery>({
     search: "",
@@ -918,6 +922,28 @@ export function LibraryCollectionPage({
                 onChange: (value) => setSearchForKind(kind, value),
                                 placeholder: `Search ${title.toLowerCase()}...`,
                             },
+                            kind === "templates" && {
+                                type: "custom",
+                                render: (
+                                    <HeaderActionsMenu
+                                        title="More actions"
+                                        items={[
+                                            {
+                                                label: "Add preset templates",
+                                                icon: BookOpen,
+                                                onSelect: () =>
+                                                    router.push(
+                                                        `${
+                                                            folderId
+                                                                ? `${collectionRootPath}/folders/${encodeURIComponent(folderId)}`
+                                                                : collectionRootPath
+                                                        }/presets`,
+                                                    ),
+                                            },
+                                        ]}
+                                    />
+                                ),
+                            },
                         ],
                     },
                     {
@@ -948,23 +974,29 @@ export function LibraryCollectionPage({
                     }
                     leading={
                         folderBackAction ? (
-                            <TabPillButtonUI onClick={folderBackAction}>
+                            <TabPillButtonUI onClick={folderBackAction} className="pl-2">
                                 <ChevronLeft className="h-3.5 w-3.5" />
                                 Back
                             </TabPillButtonUI>
                         ) : undefined
                     }
                     actions={
-                        <TabPillButtonUI
-                            onClick={createFolderAction ?? undefined}
-                            disabled={!createFolderAction || loading}
-                        >
-                            <Plus className="h-3.5 w-3.5" />
-                            <span className="hidden sm:inline">Folder</span>
-                        </TabPillButtonUI>
+                        <>
+                            {selectionActions && (
+                                <SelectionActionsMenu renderItems={selectionActions.renderMenuItems} />
+                            )}
+                            <TabPillButtonUI
+                                onClick={createFolderAction ?? undefined}
+                                disabled={!createFolderAction || loading}
+                            >
+                                <Plus className="h-3.5 w-3.5" />
+                                <span className="hidden sm:inline">Folder</span>
+                            </TabPillButtonUI>
+                        </>
                     }
                 />
                 <DocTable
+                    onSelectionActionsChange={setSelectionActions}
                     scopeKey={kind}
                     documents={collection?.documents ?? []}
                     setDocuments={setDocuments}
