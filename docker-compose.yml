@@ -172,6 +172,8 @@ services:
       - ./backend/migrations/20261008_01_email_change_moves_grants.sql:/email-change-moves-grants-migration.sql:ro
       - ./backend/migrations/20261008_02_document_version_textless_pages.sql:/textless-pages-migration.sql:ro
       - ./backend/migrations/20261008_03_bedrock_azure_user_api_keys.sql:/bedrock-azure-api-keys-migration.sql:ro
+      - ./backend/migrations/20261009_01_vertex_foundry_xai_custom_user_api_keys.sql:/vertex-foundry-xai-custom-api-keys-migration.sql:ro
+      - ./backend/migrations/20261009_02_user_api_key_enabled.sql:/user-api-key-enabled-migration.sql:ro
     entrypoint: ["bash", "-c"]
     command:
       - |
@@ -226,6 +228,8 @@ services:
         psql "$$DB" -v ON_ERROR_STOP=1 -f /email-change-moves-grants-migration.sql || exit 1;
         psql "$$DB" -v ON_ERROR_STOP=1 -f /textless-pages-migration.sql || exit 1;
         psql "$$DB" -v ON_ERROR_STOP=1 -f /bedrock-azure-api-keys-migration.sql || exit 1;
+        psql "$$DB" -v ON_ERROR_STOP=1 -f /vertex-foundry-xai-custom-api-keys-migration.sql || exit 1;
+        psql "$$DB" -v ON_ERROR_STOP=1 -f /user-api-key-enabled-migration.sql || exit 1;
         psql "$$DB" -c "grant usage on schema public to service_role;
           grant all privileges on all tables in schema public to service_role;
           grant all privileges on all sequences in schema public to service_role;

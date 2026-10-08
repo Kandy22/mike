@@ -13,6 +13,10 @@ export type Provider =
     | "opencode-go"
     | "bedrock"
     | "azure"
+    | "azure-foundry"
+    | "vertex"
+    | "xai"
+    | "custom"
     | "ollama";
 
 export const REASONING_LEVELS = [
@@ -59,6 +63,8 @@ export type StreamCallbacks = {
 };
 
 export type UserApiKeys = {
+    /** Explicitly disabled providers must never fall back to deployment keys. */
+    disabledProviders?: readonly string[];
     claude?: string | null;
     gemini?: string | null;
     openai?: string | null;
@@ -68,11 +74,18 @@ export type UserApiKeys = {
     "opencode-go"?: string | null;
     bedrock?: string | null;
     azure?: string | null;
+    "azure-foundry"?: string | null;
+    /** A Google Cloud service-account key (the JSON file's contents). */
+    vertex?: string | null;
+    xai?: string | null;
+    /** The key for the user's own OpenAI-compatible endpoint. */
+    custom?: string | null;
     courtlistener?: string | null;
     /**
      * Non-secret settings that only make sense together with the key above
-     * them: the AWS region a Bedrock key belongs to, the Azure OpenAI
-     * resource an Azure key belongs to. Each entry comes from the same
+     * them: the AWS region a Bedrock key belongs to, the Azure resource an
+     * Azure key belongs to, the Vertex AI location a service account is used
+     * in, the base URL of a custom endpoint. Each entry comes from the same
      * source (the user's saved key or the deployment's environment) as its
      * key, so a user's key is never sent to the operator's endpoint.
      */
@@ -82,6 +95,9 @@ export type UserApiKeys = {
 export type ProviderSettings = {
     bedrock?: { region: string } | null;
     azure?: { endpoint: string } | null;
+    "azure-foundry"?: { endpoint: string } | null;
+    vertex?: { location: string } | null;
+    custom?: { baseUrl: string } | null;
 };
 
 export type StreamChatParams = {

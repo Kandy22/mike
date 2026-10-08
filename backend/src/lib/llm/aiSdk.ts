@@ -73,12 +73,17 @@ export function stopNotice(
   return "";
 }
 
-/** Ensure a proxy-closed final SSE event is still visible to SDK parsers. */
+/**
+ * Ensure a proxy-closed final SSE event is still visible to SDK parsers.
+ * `baseFetch` replaces the global fetch for endpoints that need guarded
+ * egress (a user-supplied base URL).
+ */
 export async function aiSdkFetch(
   input: RequestInfo | URL,
   init?: RequestInit,
+  baseFetch?: typeof fetch,
 ): Promise<Response> {
-  const response = await fetch(input, init);
+  const response = await (baseFetch ?? fetch)(input, init);
   if (
     !response.body ||
     !response.headers.get("content-type")?.includes("text/event-stream")

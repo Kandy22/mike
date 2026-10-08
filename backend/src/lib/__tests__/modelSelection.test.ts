@@ -15,6 +15,10 @@ const routerModels = {
     "opencode-go": ["glm-5"],
     bedrock: [],
     azure: [],
+    "azure-foundry": [],
+    vertex: [],
+    xai: [],
+    custom: [],
 };
 
 describe("titleModelForChat", () => {
@@ -36,6 +40,10 @@ describe("titleModelForChat", () => {
         "opencode-go/glm-5",
         "bedrock/us.anthropic.claude-opus-5-5",
         "azure/gpt-6.1-sol",
+        "azure-foundry/mistral-large-4",
+        "vertex/gemini-3.1-pro-preview",
+        "xai/grok-4.3",
+        "custom/my-model",
         "ollama/llama3.2",
     ])("reuses dynamic model %s", (chatModel) => {
         expect(titleModelForChat(chatModel)).toBe(chatModel);
@@ -70,6 +78,65 @@ describe("hasApiKeyForModel for cloud platforms", () => {
                 providerSettings: { azure: { endpoint: "contoso-openai" } },
             }),
         ).toBe(true);
+    });
+});
+
+describe("hasApiKeyForModel for Vertex, Foundry, xAI and custom endpoints", () => {
+    const serviceAccount = JSON.stringify({
+        type: "service_account",
+        project_id: "legal-prod",
+        private_key: "-----BEGIN PRIVATE KEY-----",
+        client_email: "mike@legal-prod.iam.gserviceaccount.com",
+    });
+
+    it("requires the setting saved with each key", () => {
+        expect(
+            hasApiKeyForModel("vertex/gemini-3.8-flash", {
+                vertex: serviceAccount,
+            }),
+        ).toBe(false);
+        expect(
+            hasApiKeyForModel("vertex/gemini-3.8-flash", {
+                vertex: serviceAccount,
+                providerSettings: { vertex: { location: "us-central1" } },
+            }),
+        ).toBe(true);
+        // A stored value that is not a key file is unusable, not "configured".
+        expect(
+            hasApiKeyForModel("vertex/gemini-3.8-flash", {
+                vertex: "AIzaSy-plain-key",
+                providerSettings: { vertex: { location: "us-central1" } },
+            }),
+        ).toBe(false);
+        expect(
+            hasApiKeyForModel("azure-foundry/mistral-large-4", {
+                "azure-foundry": "k",
+            }),
+        ).toBe(false);
+        expect(
+            hasApiKeyForModel("azure-foundry/mistral-large-4", {
+                "azure-foundry": "k",
+                providerSettings: {
+                    "azure-foundry": { endpoint: "contoso-foundry" },
+                },
+            }),
+        ).toBe(true);
+        expect(hasApiKeyForModel("custom/my-model", { custom: "k" })).toBe(
+            false,
+        );
+        expect(
+            hasApiKeyForModel("custom/my-model", {
+                custom: "k",
+                providerSettings: {
+                    custom: { baseUrl: "https://llm.example.com/v1" },
+                },
+            }),
+        ).toBe(true);
+    });
+
+    it("needs only the key for xAI", () => {
+        expect(hasApiKeyForModel("xai/grok-4.3", {})).toBe(false);
+        expect(hasApiKeyForModel("xai/grok-4.3", { xai: "k" })).toBe(true);
     });
 });
 

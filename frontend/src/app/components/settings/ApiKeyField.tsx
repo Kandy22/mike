@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import {
   MfaVerificationPopup,
@@ -8,6 +8,7 @@ import {
 } from "@/app/components/popups/MfaVerificationPopup";
 import { WarningPopup } from "@/app/components/popups/WarningPopup";
 import { SettingsTextInput } from "@/app/components/settings/SettingsTextInput";
+import { FieldLabel, FormTextInput } from "@/app/components/ui/form-field";
 import { SettingsRow } from "./SettingsRow";
 import { SettingsDescription, SettingsLabel } from "./SettingsText";
 import { isMfaRequiredError } from "@/app/lib/mikeApi";
@@ -31,31 +32,54 @@ export type ApiKeyFieldSetting = {
   invalidMessage: string;
 };
 
+type ApiKeyFieldAction = {
+  label: string;
+  onClick: () => Promise<void>;
+  disabled: boolean;
+};
+
 export function ApiKeyField({
   label,
+  variant = "settings",
   description,
-  placeholder,
   hasSavedKey,
+  keyLabel = "API key",
+  validateKey,
   setting,
   onSave,
   onRemove,
+  render,
 }: {
   label: string;
+  variant?: "settings" | "modal";
   description?: string;
-  placeholder: string;
   hasSavedKey: boolean;
+  /** What the modal calls the secret, when it is not a plain API key. */
+  keyLabel?: string;
+  /** Why a typed key cannot be saved, or null when it can. */
+  validateKey?: (value: string) => string | null;
   setting?: ApiKeyFieldSetting;
   /** Called with the typed key ("" when only the setting changed) and,
    *  for fields with a setting, its normalized value. */
   onSave: (value: string, settingValue?: string) => Promise<boolean>;
   onRemove: () => Promise<boolean>;
+  /** Place the fields and actions separately, such as in a modal footer. */
+  render?: (
+    fields: ReactNode,
+    saveAction: ApiKeyFieldAction,
+    removeAction: ApiKeyFieldAction | undefined,
+  ) => ReactNode;
 }) {
   const settingInputId = useId();
   const settingErrorId = useId();
+  const keyErrorId = useId();
+  const Input = variant === "modal" ? FormTextInput : SettingsTextInput;
+  const Container = variant === "modal" ? "div" : SettingsRow;
   const savedSettingValue = setting?.savedValue ?? "";
   const [value, setValue] = useState("");
   const [settingValue, setSettingValue] = useState(savedSettingValue);
   const [settingError, setSettingError] = useState<string | null>(null);
+  const [keyError, setKeyError] = useState<string | null>(null);
   const [reveal, setReveal] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -82,6 +106,11 @@ export function ApiKeyField({
   const showMask = hasSavedKey && !isEditing && !keyDirty;
 
   const handleSave = async () => {
+    const invalidKey = keyDirty ? (validateKey?.(value) ?? null) : null;
+    if (invalidKey) {
+      setKeyError(invalidKey);
+      return;
+    }
     let normalizedSetting: string | undefined;
     if (setting) {
       const normalized = setting.normalize(settingValue);
@@ -151,26 +180,51 @@ export function ApiKeyField({
     }
   };
 
-  return (
-    <>
-      <SettingsRow layout="stacked">
+  const saveAction = {
+    label: isSaving ? "Saving..." : saved ? "Saved" : "Save",
+    onClick: handleSave,
+    disabled: isSaving || !dirty || saved,
+  };
+  const removeAction = hasSavedKey ? {
+    label: "Remove",
+    onClick: handleRemove,
+    disabled: isSaving,
+  } : undefined;
+
+  const fields = (
+    <Container
+      {...(variant === "modal"
+        ? { className: "space-y-3" }
+        : { layout: "stacked" as const })}
+    >
+      {variant !== "modal" && (
         <div className={description ? "space-y-1" : undefined}>
           <SettingsLabel>{label}</SettingsLabel>
           {description && (
             <SettingsDescription>{description}</SettingsDescription>
           )}
         </div>
-        <div className="space-y-2">
+      )}
+      <div className={variant === "modal" ? "space-y-4" : "space-y-2"}>
+        <div>
+          {variant === "modal" && (
+            <FieldLabel htmlFor={`${settingInputId}-key`}>{keyLabel}</FieldLabel>
+          )}
           <div className="relative flex-1">
-            <SettingsTextInput
+            <Input
+              id={`${settingInputId}-key`}
               aria-label={label}
               type={reveal && !showMask ? "text" : "password"}
               value={showMask ? SAVED_KEY_MASK : value}
               readOnly={showMask}
               onFocus={() => setIsEditing(true)}
               onBlur={() => setIsEditing(false)}
-              onChange={(event) => setValue(event.target.value)}
-              placeholder={hasSavedKey ? "Enter a new key to replace" : placeholder}
+              onChange={(event) => {
+                setValue(event.target.value);
+                setKeyError(null);
+              }}
+              aria-invalid={keyError ? true : undefined}
+              aria-describedby={keyError ? keyErrorId : undefined}
               className="pr-10"
               autoComplete="off"
               spellCheck={false}
@@ -190,57 +244,71 @@ export function ApiKeyField({
               </button>
             )}
           </div>
-          {setting && (
-            <div className="space-y-1">
-              <label
-                htmlFor={settingInputId}
-                className="block text-sm text-gray-500"
-              >
+          {keyError && (
+            <p id={keyErrorId} className="mt-1 text-xs text-red-600">
+              {keyError}
+            </p>
+          )}
+        </div>
+        {setting && (
+          <div className="space-y-1">
+            {variant === "modal" ? (
+              <FieldLabel htmlFor={settingInputId}>{setting.label}</FieldLabel>
+            ) : (
+              <label htmlFor={settingInputId} className="block text-sm text-gray-500">
                 {setting.label}
               </label>
-              <SettingsTextInput
-                id={settingInputId}
-                type="text"
-                value={settingValue}
-                onChange={(event) => {
-                  setSettingValue(event.target.value);
-                  setSettingError(null);
-                }}
-                placeholder={setting.placeholder}
-                aria-invalid={settingError ? true : undefined}
-                aria-describedby={settingError ? settingErrorId : undefined}
-                autoComplete="off"
-                spellCheck={false}
-              />
-              {settingError && (
-                <p id={settingErrorId} className="text-xs text-red-600">
-                  {settingError}
-                </p>
-              )}
-            </div>
-          )}
+            )}
+            <Input
+              id={settingInputId}
+              type="text"
+              value={settingValue}
+              onChange={(event) => {
+                setSettingValue(event.target.value);
+                setSettingError(null);
+              }}
+              placeholder={setting.placeholder}
+              aria-invalid={settingError ? true : undefined}
+              aria-describedby={settingError ? settingErrorId : undefined}
+              autoComplete="off"
+              spellCheck={false}
+            />
+            {settingError && (
+              <p id={settingErrorId} className="text-xs text-red-600">
+                {settingError}
+              </p>
+            )}
+          </div>
+        )}
+        {!render && (
           <div className="flex flex-wrap justify-end gap-2">
             <button
               type="button"
-              onClick={handleSave}
-              disabled={isSaving || !dirty || saved}
+              onClick={saveAction.onClick}
+              disabled={saveAction.disabled}
               className="text-xs font-medium text-gray-700 transition-colors hover:text-gray-950 disabled:cursor-not-allowed disabled:text-gray-400"
             >
-              {isSaving ? "Saving..." : saved ? "Saved" : "Save"}
+              {saveAction.label}
             </button>
-            {hasSavedKey && (
+            {removeAction && (
               <button
                 type="button"
-                onClick={handleRemove}
-                disabled={isSaving}
+                onClick={removeAction.onClick}
+                disabled={removeAction.disabled}
                 className="text-xs font-medium text-red-600 transition-colors hover:text-red-700 disabled:cursor-not-allowed disabled:text-red-300"
               >
-                Remove
+                {removeAction.label}
               </button>
             )}
           </div>
-        </div>
-      </SettingsRow>
+        )}
+      </div>
+    </Container>
+  );
+
+  return (
+    <>
+      {render ? render(fields, saveAction, removeAction) : fields}
       <MfaVerificationPopup
         open={!!pendingMfaAction}
         onCancel={() => setPendingMfaAction(null)}

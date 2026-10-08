@@ -468,12 +468,15 @@ alter table public.org_invitations enable row level security;
 create table if not exists public.user_api_keys (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
-  provider text not null check (provider in ('claude', 'gemini', 'openai', 'mistral', 'openrouter', 'vercel', 'opencode-go', 'bedrock', 'azure', 'courtlistener')),
+  provider text not null check (provider in ('claude', 'gemini', 'openai', 'mistral', 'openrouter', 'vercel', 'opencode-go', 'bedrock', 'azure', 'azure-foundry', 'vertex', 'xai', 'custom', 'courtlistener')),
   encrypted_key text not null,
   iv text not null,
   auth_tag text not null,
+  enabled boolean not null default true,
   -- Non-secret companion to the key: {"region": ...} for Bedrock,
-  -- {"endpoint": ...} for Azure OpenAI. Null for single-value keys.
+  -- {"endpoint": ...} for Azure OpenAI and Azure AI Foundry,
+  -- {"location": ...} for Vertex AI, {"baseUrl": ...} for a custom
+  -- OpenAI-compatible endpoint. Null for single-value keys.
   settings jsonb constraint user_api_keys_settings_check
     check (settings is null or jsonb_typeof(settings) = 'object'),
   created_at timestamptz not null default now(),

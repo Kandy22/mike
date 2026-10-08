@@ -74,6 +74,9 @@ import {
     getMcpConnector,
     getOllamaModels,
     getOpenCodeGoModels,
+    getXaiModels,
+    getCustomEndpointModels,
+    getBedrockModels,
     getOpenRouterModels,
     getVercelModels,
     getProject,
@@ -158,6 +161,7 @@ import {
     resolveProjectFolderPath,
     resolveDocumentEdit,
     saveApiKey,
+    setApiKeyEnabled,
     bulkDeleteLibraryDocuments,
     searchProjectDirectory,
     searchLibraryDocuments,
@@ -2411,6 +2415,20 @@ describe("thin endpoint wrappers", () => {
             method: "PUT",
             body: { api_key: "bedrock-key", settings: { region: "us-east-1" } },
         },
+        {
+            name: "setApiKeyEnabled (off)",
+            call: () => setApiKeyEnabled("openai", false),
+            url: "/user/api-keys/openai",
+            method: "PATCH",
+            body: { enabled: false },
+        },
+        {
+            name: "setApiKeyEnabled (on)",
+            call: () => setApiKeyEnabled("bedrock", true),
+            url: "/user/api-keys/bedrock",
+            method: "PATCH",
+            body: { enabled: true },
+        },
         // MCP connectors
         {
             name: "listMcpConnectors",
@@ -3176,6 +3194,9 @@ describe("unwrapping and blob wrappers", () => {
         ["OpenRouter", getOpenRouterModels, "/models/openrouter"],
         ["Vercel AI Gateway", getVercelModels, "/models/vercel"],
         ["OpenCode Go", getOpenCodeGoModels, "/models/opencode-go"],
+        ["Amazon Bedrock", getBedrockModels, "/models/bedrock"],
+        ["xAI", getXaiModels, "/models/xai"],
+        ["custom endpoint", getCustomEndpointModels, "/models/custom"],
     ])("loads the %s model catalog", async (_label, load, path) => {
         const models = [{ id: "openai/gpt-5.4", label: "GPT-5.4" }];
         fetchMock.mockResolvedValue(jsonResponse({ models }));

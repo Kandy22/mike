@@ -4,9 +4,11 @@
 // contract. Security boundary preserved verbatim: writes funnel through
 // saveUserApiKey (the crypto is never reimplemented here).
 
+import { parseVertexServiceAccount } from "../../lib/llm/cloudProviders";
 import {
     type ApiKeyProvider,
     type ApiKeyStatus,
+    type SettingsApiKeyProvider,
     getUserApiKeyStatus,
     isSettingsApiKeyProvider,
     normalizeProviderSettings,
@@ -22,17 +24,27 @@ export function getApiKeyStatus(db: Db, userId: string) {
 export type SaveApiKeyResult =
     | { ok: true; status: ApiKeyStatus }
     | { ok: false; kind: "invalid_settings"; detail: string }
+    | { ok: false; kind: "invalid_key"; detail: string }
     | { ok: false; kind: "no_saved_key"; detail: string }
     | { ok: false; kind: "save_failed"; error: unknown };
 
-const SETTINGS_REQUIREMENT: Record<"bedrock" | "azure", string> = {
+const SETTINGS_REQUIREMENT: Record<SettingsApiKeyProvider, string> = {
     bedrock: "A valid AWS region (for example us-east-1) is required with an Amazon Bedrock key.",
     azure: "A valid Azure OpenAI endpoint is required with an Azure OpenAI key: a resource name, or an https URL on openai.azure.com, cognitiveservices.azure.com or services.ai.azure.com.",
+    "azure-foundry":
+        "A valid Azure AI Foundry endpoint is required with an Azure AI Foundry key: a resource name, or an https URL on services.ai.azure.com, cognitiveservices.azure.com or openai.azure.com.",
+    vertex: "A valid Vertex AI location (for example us-central1 or global) is required with a service-account key.",
+    custom: "A public https base URL (for example https://llm.example.com/v1) is required with an OpenAI-compatible endpoint key.",
 };
 
+const INVALID_VERTEX_KEY =
+    "Paste the full contents of a Google Cloud service-account key file (JSON with type \"service_account\", project_id, client_email and private_key).";
+
 /**
- * Save, replace or remove a key. Bedrock and Azure keys also take
- * `settings` (`{ region }` / `{ endpoint }`):
+ * Save, replace or remove a key. Keys that are only usable with a setting
+ * (Bedrock, Azure OpenAI, Azure AI Foundry, Vertex AI, a custom endpoint)
+ * also take `settings` (`{ region }` / `{ endpoint }` / `{ location }` /
+ * `{ baseUrl }`):
  * - a key with valid settings saves both together;
  * - settings without a key change the settings of the already-saved key;
  * - neither removes the key and its settings.
@@ -48,6 +60,11 @@ export async function saveApiKey(
 ): Promise<SaveApiKeyResult> {
     const { userId, provider, apiKey } = params;
     const key = apiKey?.trim() || null;
+    // A Vertex "key" is a structured file; reject anything else up front
+    // instead of storing a value that fails on first use.
+    if (provider === "vertex" && key && !parseVertexServiceAccount(key)) {
+        return { ok: false, kind: "invalid_key", detail: INVALID_VERTEX_KEY };
+    }
     try {
         if (isSettingsApiKeyProvider(provider)) {
             const hasSettings =

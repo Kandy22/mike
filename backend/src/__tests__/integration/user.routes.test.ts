@@ -340,6 +340,10 @@ describe("user.routes", () => {
                 "vercel",
                 "bedrock",
                 "azure",
+                "azure-foundry",
+                "vertex",
+                "xai",
+                "custom",
             ].includes(v)
                 ? v
                 : null,
@@ -841,6 +845,40 @@ describe("user.routes", () => {
         });
     });
 
+    describe("PATCH /user/api-keys/:provider", () => {
+        it.each([false, true])("sets enabled=%s without rewriting the encrypted key", async (enabled) => {
+            supabaseState.tables.user_api_keys = { data: [{ provider: "openai" }], error: null };
+            const response = await request(app)
+                .patch("/user/api-keys/openai")
+                .send({ enabled });
+            expect(response.status).toBe(200);
+            expect(supabaseState.updates.user_api_keys).toEqual([
+                { enabled, updated_at: expect.any(String) },
+            ]);
+            expect(saveUserApiKey).not.toHaveBeenCalled();
+            expect(requireMfaIfEnrolled).toHaveBeenCalledOnce();
+        });
+
+        it("requires an existing saved key", async () => {
+            supabaseState.tables.user_api_keys = { data: [], error: null };
+            const response = await request(app).patch("/user/api-keys/openai").send({ enabled: false });
+            expect(response.status).toBe(404);
+        });
+
+        it.each([{ enabled: "false" }, {}, { enabled: null }])("rejects an invalid enabled value: %j", async (body) => {
+            const response = await request(app).patch("/user/api-keys/openai").send(body);
+            expect(response.status).toBe(400);
+            expect(supabaseState.updates.user_api_keys).toBeUndefined();
+        });
+
+        it("enforces MFA before changing a provider", async () => {
+            requireMfaIfEnrolled.mockImplementation((_req, res) => res.status(403).json({ code: "mfa_required" }));
+            const response = await request(app).patch("/user/api-keys/openai").send({ enabled: false });
+            expect(response.status).toBe(403);
+            expect(supabaseState.updates.user_api_keys).toBeUndefined();
+        });
+    });
+
     // ── PUT /user/api-keys/:provider (crypto + MFA guard) ─────────────────
     describe("PUT /user/api-keys/:provider", () => {
         it("stores the key via the encryption helper and returns status", async () => {
@@ -976,6 +1014,109 @@ describe("user.routes", () => {
             expect(res.status).toBe(400);
             expect(res.body.detail).toMatch(/Azure OpenAI endpoint/);
             expect(saveUserApiKey).not.toHaveBeenCalled();
+        });
+
+        it("rejects a Vertex key that is not a service-account file", async () => {
+            const res = await request(app)
+                .put("/user/api-keys/vertex")
+                .set(...AUTH)
+                .send({
+                    api_key: "AIzaSy-plain-key",
+                    settings: { location: "us-central1" },
+                });
+
+            expect(res.status).toBe(400);
+            expect(res.body.detail).toMatch(/service-account key file/);
+            expect(saveUserApiKey).not.toHaveBeenCalled();
+        });
+
+        it("saves a Vertex service-account key with its location", async () => {
+            const key = JSON.stringify({
+                type: "service_account",
+                project_id: "legal-prod",
+                private_key: "-----BEGIN PRIVATE KEY-----",
+                client_email: "mike@legal-prod.iam.gserviceaccount.com",
+            });
+            const res = await request(app)
+                .put("/user/api-keys/vertex")
+                .set(...AUTH)
+                .send({ api_key: key, settings: { location: " US-Central1 " } });
+
+            expect(res.status).toBe(200);
+            expect(saveUserApiKey).toHaveBeenCalledWith(
+                "u1",
+                "vertex",
+                key,
+                expect.anything(),
+                { vertex: { location: "us-central1" } },
+            );
+        });
+
+        it("rejects a custom endpoint that is not public https", async () => {
+            for (const baseUrl of [
+                "http://llm.example.com/v1",
+                "https://localhost:4000/v1",
+                "https://169.254.169.254/latest",
+                "https://10.1.2.3/v1",
+            ]) {
+                const res = await request(app)
+                    .put("/user/api-keys/custom")
+                    .set(...AUTH)
+                    .send({ api_key: "sk-custom", settings: { baseUrl } });
+
+                expect(res.status).toBe(400);
+                expect(res.body.detail).toMatch(/public https base URL/);
+            }
+            expect(saveUserApiKey).not.toHaveBeenCalled();
+        });
+
+        it("saves a custom endpoint, a Foundry key and an xAI key", async () => {
+            await request(app)
+                .put("/user/api-keys/custom")
+                .set(...AUTH)
+                .send({
+                    api_key: "sk-custom",
+                    settings: { baseUrl: "https://llm.example.com/v1/" },
+                })
+                .expect(200);
+            await request(app)
+                .put("/user/api-keys/azure-foundry")
+                .set(...AUTH)
+                .send({
+                    api_key: "foundry-key",
+                    settings: { endpoint: "Contoso-Foundry" },
+                })
+                .expect(200);
+            await request(app)
+                .put("/user/api-keys/xai")
+                .set(...AUTH)
+                .send({ api_key: "xai-key" })
+                .expect(200);
+
+            expect(saveUserApiKey).toHaveBeenCalledWith(
+                "u1",
+                "custom",
+                "sk-custom",
+                expect.anything(),
+                { custom: { baseUrl: "https://llm.example.com/v1" } },
+            );
+            expect(saveUserApiKey).toHaveBeenCalledWith(
+                "u1",
+                "azure-foundry",
+                "foundry-key",
+                expect.anything(),
+                {
+                    "azure-foundry": {
+                        endpoint: "https://contoso-foundry.services.ai.azure.com",
+                    },
+                },
+            );
+            expect(saveUserApiKey).toHaveBeenCalledWith(
+                "u1",
+                "xai",
+                "xai-key",
+                expect.anything(),
+            );
         });
 
         it("changes only the Azure endpoint when no new key is sent", async () => {

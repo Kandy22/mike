@@ -1,6 +1,8 @@
-// Credentials for the two cloud platforms whose keys only work together with a
-// non-secret setting: Amazon Bedrock (an API key scoped to an AWS region) and
-// Azure OpenAI (an API key scoped to one Azure resource).
+// Credentials for the providers whose keys only work together with a
+// non-secret setting: Amazon Bedrock (an API key scoped to an AWS region),
+// Azure OpenAI and Azure AI Foundry (an API key scoped to one Azure resource),
+// Google Vertex AI (a service-account key used in one location) and a user's
+// own OpenAI-compatible endpoint (a key for one base URL).
 //
 // A key and its setting always come from the same source. A user's saved key
 // travels with the region/endpoint the user saved next to it; the
@@ -8,10 +10,21 @@
 // region/endpoint. Mixing them would send a user's key to the operator's
 // Azure resource, or the operator's key to a resource the user chose.
 
+import { BLOCKED_METADATA_HOSTS } from "../mcp/types";
+import { isBlockedIp } from "../privateIp";
 import type { UserApiKeys } from "./types";
 
 export type BedrockCredentials = { apiKey: string; region: string };
 export type AzureCredentials = { apiKey: string; endpoint: string };
+export type AzureFoundryCredentials = { apiKey: string; endpoint: string };
+export type VertexServiceAccount = {
+    clientEmail: string;
+    privateKey: string;
+    privateKeyId?: string;
+    project: string;
+};
+export type VertexCredentials = VertexServiceAccount & { location: string };
+export type CustomEndpointCredentials = { apiKey: string; baseUrl: string };
 
 // AWS region codes: "us-east-1", "eu-central-2", "us-gov-west-1",
 // "ap-southeast-5". Anything else is rejected rather than interpolated into
@@ -73,6 +86,127 @@ export function normalizeAzureEndpoint(value: unknown): string | null {
     return `https://${hostname}${path}`;
 }
 
+/**
+ * The Azure AI Foundry resource a key belongs to, as an https origin. Accepts
+ * a resource name ("contoso-foundry" → https://contoso-foundry.services.ai.azure.com)
+ * or an https URL on an Azure AI hostname; any path is dropped because the
+ * adapter appends the API path of the protocol each deployment speaks.
+ */
+export function normalizeAzureFoundryEndpoint(value: unknown): string | null {
+    if (typeof value !== "string") return null;
+    const trimmed = value.trim();
+    if (AZURE_RESOURCE_NAME_RE.test(trimmed)) {
+        return `https://${trimmed.toLowerCase()}.services.ai.azure.com`;
+    }
+    const endpoint = normalizeAzureEndpoint(trimmed);
+    return endpoint ? new URL(endpoint).origin : null;
+}
+
+// Vertex AI locations are a single DNS label interpolated into the API
+// hostname: "us-central1", "europe-west4", or the multi-region "global",
+// "us" and "eu".
+const VERTEX_LOCATION_RE = /^[a-z][a-z0-9-]{0,30}[a-z0-9]$/;
+
+export function normalizeVertexLocation(value: unknown): string | null {
+    if (typeof value !== "string") return null;
+    const location = value.trim().toLowerCase();
+    return VERTEX_LOCATION_RE.test(location) ? location : null;
+}
+
+// A project id is interpolated into the request path. Legacy ids carry a
+// domain prefix ("example.com:my-project").
+const GCP_PROJECT_ID_RE = /^(?:[a-z0-9.-]{1,60}:)?[a-z][a-z0-9-]{4,28}[a-z0-9]$/;
+const SERVICE_ACCOUNT_EMAIL_RE = /^[^\s@]{1,100}@[a-z0-9.-]{1,150}\.gserviceaccount\.com$/i;
+const MAX_SERVICE_ACCOUNT_KEY_LENGTH = 16_000;
+
+/**
+ * The fields Mike uses from a Google Cloud service-account key file, or null
+ * when the value is not one. Only these fields are read: a key file's own
+ * `token_uri` and `universe_domain` are ignored, so a crafted file cannot
+ * redirect the token exchange to another host.
+ */
+export function parseVertexServiceAccount(
+    value: unknown,
+): VertexServiceAccount | null {
+    if (typeof value !== "string") return null;
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.length > MAX_SERVICE_ACCOUNT_KEY_LENGTH) return null;
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(trimmed);
+    } catch {
+        return null;
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return null;
+    }
+    const record = parsed as Record<string, unknown>;
+    const clientEmail = record.client_email;
+    const privateKey = record.private_key;
+    const project = record.project_id;
+    const privateKeyId = record.private_key_id;
+    if (
+        record.type !== "service_account" ||
+        typeof clientEmail !== "string" ||
+        !SERVICE_ACCOUNT_EMAIL_RE.test(clientEmail) ||
+        typeof privateKey !== "string" ||
+        !privateKey.includes("-----BEGIN PRIVATE KEY-----") ||
+        typeof project !== "string" ||
+        !GCP_PROJECT_ID_RE.test(project)
+    ) {
+        return null;
+    }
+    return {
+        clientEmail,
+        privateKey,
+        project,
+        ...(typeof privateKeyId === "string" && privateKeyId
+            ? { privateKeyId }
+            : {}),
+    };
+}
+
+/**
+ * The base URL of a user's own OpenAI-compatible endpoint, without a trailing
+ * slash, or null when it is not acceptable. The backend sends requests and
+ * the user's key to this URL, so it must be public https: no credentials,
+ * query or fragment, and no loopback, private or cloud-metadata host. This
+ * is the save-time check; requests additionally go through the DNS-pinning
+ * guarded fetch, which rejects a public name that resolves privately.
+ */
+export function normalizeCustomBaseUrl(value: unknown): string | null {
+    if (typeof value !== "string") return null;
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.length > 300) return null;
+    let url: URL;
+    try {
+        url = new URL(trimmed);
+    } catch {
+        return null;
+    }
+    const hostname = url.hostname.toLowerCase();
+    const literalHost =
+        hostname.startsWith("[") && hostname.endsWith("]")
+            ? hostname.slice(1, -1)
+            : hostname;
+    const isIpLiteral = /^[\d.]+$/.test(literalHost) || literalHost.includes(":");
+    if (
+        url.protocol !== "https:" ||
+        url.username ||
+        url.password ||
+        url.search ||
+        url.hash ||
+        !hostname ||
+        hostname === "localhost" ||
+        hostname.endsWith(".localhost") ||
+        BLOCKED_METADATA_HOSTS.has(hostname) ||
+        (isIpLiteral ? isBlockedIp(literalHost) : !hostname.includes("."))
+    ) {
+        return null;
+    }
+    return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
+}
+
 /** How `createAzure` should address a normalized endpoint. */
 export function azureClientTarget(
     endpoint: string,
@@ -108,6 +242,28 @@ export function envAzureEndpoint(): string | null {
     );
 }
 
+export function envAzureFoundryCredentials(): AzureFoundryCredentials | null {
+    const apiKey = process.env.AZURE_FOUNDRY_API_KEY?.trim();
+    const endpoint = normalizeAzureFoundryEndpoint(
+        process.env.AZURE_FOUNDRY_ENDPOINT,
+    );
+    return apiKey && endpoint ? { apiKey, endpoint } : null;
+}
+
+/** The deployment's own service-account key, exactly as configured. */
+export function envVertexServiceAccountKey(): string | null {
+    return process.env.GOOGLE_VERTEX_CREDENTIALS_JSON?.trim() || null;
+}
+
+/** The deployment's own Vertex AI credentials, when both halves are valid. */
+export function envVertexCredentials(): VertexCredentials | null {
+    const account = parseVertexServiceAccount(envVertexServiceAccountKey());
+    const location = normalizeVertexLocation(
+        process.env.GOOGLE_VERTEX_LOCATION,
+    );
+    return account && location ? { ...account, location } : null;
+}
+
 /** The deployment's own Bedrock credentials, when both halves are set. */
 export function envBedrockCredentials(): BedrockCredentials | null {
     const apiKey = envBedrockApiKey();
@@ -130,6 +286,7 @@ export function envAzureCredentials(): AzureCredentials | null {
 export function bedrockCredentials(
     apiKeys?: UserApiKeys,
 ): BedrockCredentials | null {
+    if (apiKeys?.disabledProviders?.includes("bedrock")) return null;
     const apiKey = apiKeys?.bedrock?.trim();
     if (apiKey) {
         const region = normalizeAwsRegion(
@@ -144,6 +301,7 @@ export function bedrockCredentials(
 export function azureCredentials(
     apiKeys?: UserApiKeys,
 ): AzureCredentials | null {
+    if (apiKeys?.disabledProviders?.includes("azure")) return null;
     const apiKey = apiKeys?.azure?.trim();
     if (apiKey) {
         const endpoint = normalizeAzureEndpoint(
@@ -152,4 +310,53 @@ export function azureCredentials(
         return endpoint ? { apiKey, endpoint } : null;
     }
     return envAzureCredentials();
+}
+
+/** Azure AI Foundry credentials for a request; see bedrockCredentials. */
+export function azureFoundryCredentials(
+    apiKeys?: UserApiKeys,
+): AzureFoundryCredentials | null {
+    if (apiKeys?.disabledProviders?.includes("azure-foundry")) return null;
+    const apiKey = apiKeys?.["azure-foundry"]?.trim();
+    if (apiKey) {
+        const endpoint = normalizeAzureFoundryEndpoint(
+            apiKeys?.providerSettings?.["azure-foundry"]?.endpoint,
+        );
+        return endpoint ? { apiKey, endpoint } : null;
+    }
+    return envAzureFoundryCredentials();
+}
+
+/**
+ * Vertex AI credentials for a request; see bedrockCredentials. The key is the
+ * service-account JSON, which also names the project.
+ */
+export function vertexCredentials(
+    apiKeys?: UserApiKeys,
+): VertexCredentials | null {
+    if (apiKeys?.disabledProviders?.includes("vertex")) return null;
+    const key = apiKeys?.vertex?.trim();
+    if (key) {
+        const account = parseVertexServiceAccount(key);
+        const location = normalizeVertexLocation(
+            apiKeys?.providerSettings?.vertex?.location,
+        );
+        return account && location ? { ...account, location } : null;
+    }
+    return envVertexCredentials();
+}
+
+/**
+ * A user's own OpenAI-compatible endpoint. There is no environment fallback:
+ * deployments declare shared endpoints in MIKE_MODEL_CONFIG_JSON instead.
+ */
+export function customEndpointCredentials(
+    apiKeys?: UserApiKeys,
+): CustomEndpointCredentials | null {
+    if (apiKeys?.disabledProviders?.includes("custom")) return null;
+    const apiKey = apiKeys?.custom?.trim();
+    const baseUrl = normalizeCustomBaseUrl(
+        apiKeys?.providerSettings?.custom?.baseUrl,
+    );
+    return apiKey && baseUrl ? { apiKey, baseUrl } : null;
 }

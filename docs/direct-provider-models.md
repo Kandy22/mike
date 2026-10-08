@@ -15,6 +15,19 @@ audio, embedding, or restricted-access models.
 Main chat still requires an explicit model selection. Internal Gemini fallbacks
 use 3.8 Flash. A saved title-model override continues to take precedence.
 
+## Provider switches
+
+Each provider card in Model Providers shows an on/off switch once a personal
+key is saved. Turning a provider off preserves its encrypted key, settings, and
+model selections, but makes its models unavailable and blocks requests through
+that provider, including fallback to a deployment key. Turning it back on
+restores access. Clearing the personal key still restores the environment
+fallback.
+
+Existing databases need
+`backend/migrations/20261009_02_user_api_key_enabled.sql`. Saved keys start
+enabled; fresh installs include the column in `backend/schema.sql`.
+
 ## Mistral setup
 
 Create an API key in [Mistral Studio](https://console.mistral.ai/), then save it
@@ -76,6 +89,63 @@ saved list. Before deploying this version to an existing database, apply
 provider constraint and adds the nullable `settings` column that holds the
 region or endpoint. Encrypted key storage, ownership checks and RLS are
 unchanged.
+
+## Google Vertex AI, Azure AI Foundry, xAI and custom endpoints
+
+Four more providers are saved under Settings → Bring Your Own Keys. Three of
+them pair the key with a non-secret value, like Bedrock and Azure OpenAI:
+
+| Provider | Key | Saved with |
+| --- | --- | --- |
+| Google Vertex AI | The full contents of a service-account key file (JSON) | The Vertex AI location, for example `us-central1` or `global` |
+| Azure AI Foundry | The Foundry resource's API key | The resource name (`contoso-foundry`) or its endpoint URL |
+| xAI | An xAI API key | — |
+| OpenAI-compatible endpoint | The endpoint's API key | Its base URL, for example `https://llm.example.com/v1` |
+
+Self-hosted deployments can instead set `GOOGLE_VERTEX_CREDENTIALS_JSON` with
+`GOOGLE_VERTEX_LOCATION`, `AZURE_FOUNDRY_API_KEY` with
+`AZURE_FOUNDRY_ENDPOINT`, and `XAI_API_KEY`. A custom endpoint has no
+environment form: deployments declare shared endpoints in
+`MIKE_MODEL_CONFIG_JSON`. As elsewhere, a personal key runs only with its own
+saved setting.
+
+Models are added per provider once the key is saved. The app-level IDs are
+`vertex/<model-id>`, `azure-foundry/<deployment>`, `xai/<model>` and
+`custom/<model>`, and a request can only use a model in the requesting user's
+saved list.
+
+- **Vertex AI:** the service account needs the Vertex AI User role, and the
+  project is read from the key file's `project_id`. A model ID selects the
+  protocol: `claude…` IDs (`claude-opus-5-5@20260101`) use Anthropic Messages,
+  `publisher/model` IDs (`meta/llama-4-maverick-maas`) use the
+  OpenAI-compatible partner-model endpoint, and anything else is sent to the
+  Gemini API. Access tokens are minted from the key's email and private key
+  only and cached per key; the file's `token_uri` is ignored, and neither
+  ambient Google credentials nor a `GOOGLE_VERTEX_API_KEY` in the environment
+  is ever used. Models are typed by ID.
+- **Azure AI Foundry:** deployment names of non-OpenAI models. A deployment
+  whose name contains `claude` is called over Anthropic Messages at
+  `/anthropic/v1`; every other deployment is called over Chat Completions at
+  `/openai/v1`, without reasoning controls. Rename-proofing is not possible
+  with an API key, so keep `claude` in the name of Claude deployments. OpenAI
+  deployments belong under Azure OpenAI, which uses the Responses API.
+- **xAI:** the model list is read live from `https://api.x.ai/v1/models`, with
+  image, video and voice models filtered out. Requests use `@ai-sdk/xai`.
+- **OpenAI-compatible endpoint:** any service that implements
+  `POST {base URL}/chat/completions`, such as a LiteLLM proxy, vLLM, Groq,
+  Together, Fireworks or DeepSeek. The model list is read from
+  `GET {base URL}/models` when the endpoint offers one; otherwise IDs are
+  typed. Because the backend sends requests and the key to a URL the user
+  chose, the URL must be public `https`, and every request goes through the
+  same guarded fetch as custom MCP connectors: loopback, private, link-local
+  and cloud-metadata addresses are refused, including when a public name
+  resolves to one. Endpoints on a private network belong in
+  `MIKE_MODEL_CONFIG_JSON`.
+
+Before deploying this version to an existing database, apply
+`backend/migrations/20261009_01_vertex_foundry_xai_custom_user_api_keys.sql`,
+which extends the provider constraint. Encrypted key storage, ownership checks
+and RLS are unchanged.
 
 ## Saved selections
 

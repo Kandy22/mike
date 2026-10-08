@@ -5,9 +5,15 @@ import { logError } from "../../lib/log";
 import type { ProviderSettings, UserApiKeys } from "../../lib/llm";
 import {
     envAzureCredentials,
+    envAzureFoundryCredentials,
     envBedrockCredentials,
+    envVertexCredentials,
+    envVertexServiceAccountKey,
     normalizeAwsRegion,
     normalizeAzureEndpoint,
+    normalizeAzureFoundryEndpoint,
+    normalizeCustomBaseUrl,
+    normalizeVertexLocation,
 } from "../../lib/llm/cloudProviders";
 
 export type ApiKeyProvider =
@@ -20,12 +26,17 @@ export type ApiKeyProvider =
     | "opencode-go"
     | "bedrock"
     | "azure"
+    | "azure-foundry"
+    | "vertex"
+    | "xai"
+    | "custom"
     | "courtlistener";
 export type ApiKeySource = "user" | "env" | null;
 /** Providers whose key is only usable together with a non-secret setting. */
 export type SettingsApiKeyProvider = keyof ProviderSettings;
 export type ApiKeyStatus = Record<ApiKeyProvider, boolean> & {
     sources: Record<ApiKeyProvider, ApiKeySource>;
+    enabled: Partial<Record<ApiKeyProvider, boolean>>;
     /**
      * The settings saved with the user's own key. Deployment (env) settings
      * are not echoed back: an operator's Azure resource is not the user's
@@ -40,6 +51,7 @@ type EncryptedKeyRow = {
     iv: string;
     auth_tag: string;
     settings?: unknown;
+    enabled?: boolean;
 };
 
 const PROVIDERS: ApiKeyProvider[] = [
@@ -52,19 +64,31 @@ const PROVIDERS: ApiKeyProvider[] = [
     "opencode-go",
     "bedrock",
     "azure",
+    "azure-foundry",
+    "vertex",
+    "xai",
+    "custom",
     "courtlistener",
+];
+
+const SETTINGS_PROVIDERS: readonly SettingsApiKeyProvider[] = [
+    "bedrock",
+    "azure",
+    "azure-foundry",
+    "vertex",
+    "custom",
 ];
 
 export function isSettingsApiKeyProvider(
     provider: ApiKeyProvider,
 ): provider is SettingsApiKeyProvider {
-    return provider === "bedrock" || provider === "azure";
+    return (SETTINGS_PROVIDERS as readonly string[]).includes(provider);
 }
 
 /**
- * Validate the setting a Bedrock or Azure key must be saved with
- * ({ region } or { endpoint }) and return it as a one-entry ProviderSettings,
- * or null when the value is missing or malformed.
+ * Validate the setting a key must be saved with ({ region }, { endpoint },
+ * { location } or { baseUrl }) and return it as a one-entry
+ * ProviderSettings, or null when the value is missing or malformed.
  */
 export function normalizeProviderSettings(
     provider: SettingsApiKeyProvider,
@@ -78,8 +102,20 @@ export function normalizeProviderSettings(
         const region = normalizeAwsRegion(record.region);
         return region ? { bedrock: { region } } : null;
     }
-    const endpoint = normalizeAzureEndpoint(record.endpoint);
-    return endpoint ? { azure: { endpoint } } : null;
+    if (provider === "azure") {
+        const endpoint = normalizeAzureEndpoint(record.endpoint);
+        return endpoint ? { azure: { endpoint } } : null;
+    }
+    if (provider === "azure-foundry") {
+        const endpoint = normalizeAzureFoundryEndpoint(record.endpoint);
+        return endpoint ? { "azure-foundry": { endpoint } } : null;
+    }
+    if (provider === "vertex") {
+        const location = normalizeVertexLocation(record.location);
+        return location ? { vertex: { location } } : null;
+    }
+    const baseUrl = normalizeCustomBaseUrl(record.baseUrl);
+    return baseUrl ? { custom: { baseUrl } } : null;
 }
 
 function envApiKey(provider: ApiKeyProvider): string | null {
@@ -112,6 +148,16 @@ function envApiKey(provider: ApiKeyProvider): string | null {
             return envBedrockCredentials()?.apiKey ?? null;
         case "azure":
             return envAzureCredentials()?.apiKey ?? null;
+        case "azure-foundry":
+            return envAzureFoundryCredentials()?.apiKey ?? null;
+        case "vertex":
+            return envVertexCredentials() ? envVertexServiceAccountKey() : null;
+        case "xai":
+            return process.env.XAI_API_KEY?.trim() || null;
+        // A custom endpoint is always the user's own; deployments declare
+        // shared endpoints in MIKE_MODEL_CONFIG_JSON.
+        case "custom":
+            return null;
         case "courtlistener":
             return process.env.COURTLISTENER_API_TOKEN?.trim() || null;
         default:
@@ -200,6 +246,10 @@ export async function getUserApiKeyStatus(
         "opencode-go": false,
         bedrock: false,
         azure: false,
+        "azure-foundry": false,
+        vertex: false,
+        xai: false,
+        custom: false,
         courtlistener: false,
         sources: {
             claude: null,
@@ -211,9 +261,14 @@ export async function getUserApiKeyStatus(
             "opencode-go": null,
             bedrock: null,
             azure: null,
+            "azure-foundry": null,
+            vertex: null,
+            xai: null,
+            custom: null,
             courtlistener: null,
         },
         settings: {},
+        enabled: {},
     };
 
     for (const provider of PROVIDERS) {
@@ -225,13 +280,18 @@ export async function getUserApiKeyStatus(
 
     const { data, error } = await db
         .from("user_api_keys")
-        .select("provider, settings")
+        .select("provider, settings, enabled")
         .eq("user_id", userId);
     if (error) throw error;
 
     for (const row of data ?? []) {
         const provider = normalizeApiKeyProvider(String(row.provider));
         if (!provider) continue;
+        status.enabled[provider] = row.enabled !== false;
+        if (row.enabled === false) {
+            status[provider] = false;
+            status.sources[provider] = "user";
+        }
         if (isSettingsApiKeyProvider(provider)) {
             // A saved key without a valid setting cannot be used; report it
             // as not configured rather than as a key that will fail later.
@@ -239,7 +299,7 @@ export async function getUserApiKeyStatus(
             if (!settings) continue;
             Object.assign(status.settings, settings);
         }
-        status[provider] = true;
+        status[provider] = row.enabled !== false;
         status.sources[provider] = "user";
     }
 
@@ -260,25 +320,42 @@ export async function getUserApiKeys(
         "opencode-go": envApiKey("opencode-go"),
         bedrock: envApiKey("bedrock"),
         azure: envApiKey("azure"),
+        "azure-foundry": envApiKey("azure-foundry"),
+        vertex: envApiKey("vertex"),
+        xai: envApiKey("xai"),
+        custom: envApiKey("custom"),
         courtlistener: envApiKey("courtlistener"),
     };
     const envBedrock = envBedrockCredentials();
     const envAzure = envAzureCredentials();
+    const envAzureFoundry = envAzureFoundryCredentials();
+    const envVertex = envVertexCredentials();
     const providerSettings: ProviderSettings = {
         bedrock: envBedrock ? { region: envBedrock.region } : null,
         azure: envAzure ? { endpoint: envAzure.endpoint } : null,
+        "azure-foundry": envAzureFoundry
+            ? { endpoint: envAzureFoundry.endpoint }
+            : null,
+        vertex: envVertex ? { location: envVertex.location } : null,
+        custom: null,
     };
     apiKeys.providerSettings = providerSettings;
 
     const { data, error } = await db
         .from("user_api_keys")
-        .select("provider, encrypted_key, iv, auth_tag, settings")
+        .select("provider, encrypted_key, iv, auth_tag, settings, enabled")
         .eq("user_id", userId);
     if (error) throw error;
 
     for (const row of (data ?? []) as EncryptedKeyRow[]) {
         const provider = normalizeApiKeyProvider(row.provider);
         if (!provider) continue;
+        if (row.enabled === false) {
+            apiKeys[provider] = null;
+            apiKeys.disabledProviders = [...(apiKeys.disabledProviders ?? []), provider];
+            if (isSettingsApiKeyProvider(provider)) providerSettings[provider] = null;
+            continue;
+        }
         const userKey = decrypt(row)?.trim() || null;
         if (!userKey) continue;
         if (isSettingsApiKeyProvider(provider)) {
@@ -328,7 +405,8 @@ export async function saveUserApiKey(
 }
 
 /**
- * Change the setting saved with an existing Bedrock or Azure key without
+ * Change the setting saved with an existing key (a region, endpoint,
+ * location or base URL) without
  * re-entering the key. Returns false when the user has no saved key for the
  * provider.
  */
