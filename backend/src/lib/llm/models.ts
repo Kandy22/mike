@@ -43,10 +43,6 @@ export const GEMINI_LOW_MODELS = ["gemini-3.5-flash-lite"] as const;
 export const OPENAI_LOW_MODELS = ["gpt-6-luna"] as const;
 export const MISTRAL_LOW_MODELS = ["mistral-small-2603"] as const;
 
-export const DEFAULT_MAIN_MODEL = "gemini-3.8-flash";
-export const DEFAULT_TITLE_MODEL = "gemini-3.5-flash-lite";
-export const DEFAULT_TABULAR_MODEL = "gemini-3.8-flash";
-
 const STANDARD_REASONING_LEVELS: readonly ReasoningLevel[] =
     REASONING_LEVELS.filter((level) => level !== "max");
 const ALWAYS_REASONING_LEVELS: readonly ReasoningLevel[] =
