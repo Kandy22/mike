@@ -27,7 +27,7 @@ function isLoginMfaBootstrapRoute(req: Request) {
   }
   return (
     (req.method === "GET" || req.method === "POST") &&
-    (path === "/user/profile" || path === "/users/profile")
+    path === "/user/profile"
   );
 }
 

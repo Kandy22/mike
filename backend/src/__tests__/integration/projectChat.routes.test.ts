@@ -170,7 +170,6 @@ vi.mock("../../modules/user/user.settings", () => ({
         },
     })),
     persistLastSelectedChatModel: vi.fn(async () => null),
-    getUserApiKeys: vi.fn(async () => ({})),
 }));
 
 vi.mock("../../lib/access", () => ({
