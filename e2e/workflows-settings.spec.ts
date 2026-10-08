@@ -330,7 +330,14 @@ test.describe("Settings", () => {
         await expect(page.getByText("Google (Gemini) API Key")).toBeVisible({
             timeout: 10_000,
         });
-        await expect(page.getByText("OpenAI API Key")).toBeVisible({
+        // exact: "Azure OpenAI API Key" also contains "OpenAI API Key".
+        await expect(
+            page.getByText("OpenAI API Key", { exact: true }),
+        ).toBeVisible({ timeout: 10_000 });
+        await expect(page.getByText("Amazon Bedrock API Key")).toBeVisible({
+            timeout: 10_000,
+        });
+        await expect(page.getByText("Azure OpenAI API Key")).toBeVisible({
             timeout: 10_000,
         });
     });
