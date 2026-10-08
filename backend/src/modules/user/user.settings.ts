@@ -1,7 +1,7 @@
 import { createServerSupabase, type Db } from "../../lib/supabase";
 import { type UserApiKeys } from "../../lib/llm";
 import { type ReasoningLevel } from "../../lib/llm";
-import { getUserApiKeys as getStoredUserApiKeys } from "./user.apiKeyStore";
+import { getUserApiKeys } from "./user.apiKeyStore";
 import { loadCustomInstructions } from "./user.customInstructions";
 import {
     DEFAULT_RESPONSE_STYLE,
@@ -63,7 +63,7 @@ export async function getUserModelSettings(
             )
             .eq("user_id", userId)
             .single(),
-        getStoredUserApiKeys(userId, client),
+        getUserApiKeys(userId, client),
         getAllUserRouterModels(userId, client),
         // Instructions are an enhancement: a failed read must not block chat.
         loadCustomInstructions(client, userId).catch((error: unknown) => {
@@ -236,12 +236,4 @@ export async function persistLastSelectedChatModel(
         })
         .eq("user_id", userId);
     return error ?? null;
-}
-
-export async function getUserApiKeys(
-    userId: string,
-    db?: Db,
-): Promise<UserApiKeys> {
-    const client = db ?? createServerSupabase();
-    return getStoredUserApiKeys(userId, client);
 }
