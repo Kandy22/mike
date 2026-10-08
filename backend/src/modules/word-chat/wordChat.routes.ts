@@ -23,7 +23,6 @@ import { createServerSupabase } from "../../lib/supabase";
 import {
   AssistantStreamError,
   assistantStreamErrorPayload,
-  ASSISTANT_ERROR_MESSAGE,
   buildCancelledAssistantMessage,
   extractCitations,
   isAbortError,
