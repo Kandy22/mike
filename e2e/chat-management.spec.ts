@@ -112,7 +112,13 @@ test("rename chat: sidebar rename interaction updates the title", async ({ page 
                 r.request().method() === "POST",
             { timeout: 30_000 },
         )
-        .then((r) => r.finished())
+        // finished() has no timeout of its own; cap it like the response wait.
+        .then((r) =>
+            Promise.race([
+                r.finished(),
+                new Promise((resolve) => setTimeout(resolve, 30_000)),
+            ]),
+        )
         .catch(() => null);
     await textarea.press("Enter");
 
@@ -201,7 +207,13 @@ test("delete chat: sidebar delete action removes the chat from history", async (
                 r.request().method() === "POST",
             { timeout: 30_000 },
         )
-        .then((r) => r.finished())
+        // finished() has no timeout of its own; cap it like the response wait.
+        .then((r) =>
+            Promise.race([
+                r.finished(),
+                new Promise((resolve) => setTimeout(resolve, 30_000)),
+            ]),
+        )
         .catch(() => null);
 
     // Pick a Claude model (available via the backend's ANTHROPIC_API_KEY) so
