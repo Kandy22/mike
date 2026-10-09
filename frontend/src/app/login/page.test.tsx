@@ -9,6 +9,8 @@ const {
     signup,
     startGoogleOAuth,
     refreshSession,
+    retrySession,
+    authState,
     replace,
     push,
     getUserProfile,
@@ -18,6 +20,8 @@ const {
     signup: vi.fn(),
     startGoogleOAuth: vi.fn(),
     refreshSession: vi.fn(),
+    retrySession: vi.fn(),
+    authState: { error: null as string | null },
     replace: vi.fn(),
     push: vi.fn(),
     getUserProfile: vi.fn(),
@@ -45,6 +49,8 @@ vi.mock("@/app/contexts/AuthContext", () => ({
         isAuthenticated: false,
         authLoading: false,
         refreshSession,
+        retrySession,
+        authError: authState.error,
     }),
 }));
 
@@ -54,6 +60,8 @@ vi.mock("@/app/components/site-logo", () => ({
 
 describe("LoginPage", () => {
     beforeEach(() => {
+        authState.error = null;
+        retrySession.mockReset();
         login.mockReset();
         signup.mockReset();
         startGoogleOAuth.mockReset();
@@ -87,6 +95,61 @@ describe("LoginPage", () => {
         await user.click(screen.getByRole("button", { name: "Log in" }));
 
         expect(login).toHaveBeenCalledWith("existing@example.com", "oldpass");
+        expect(push).toHaveBeenCalledWith("/onboarding/profile");
+    });
+
+    it.each([
+        [
+            "a specific GoTrue code",
+            Object.assign(new Error("Invalid login credentials"), {
+                status: 400,
+                code: "invalid_credentials",
+            }),
+            "The email or password is incorrect.",
+        ],
+        [
+            "too many attempts",
+            Object.assign(new Error("Request rate limit reached"), {
+                status: 429,
+            }),
+            "Too many attempts. Wait a moment and try again.",
+        ],
+        [
+            "a dropped connection",
+            new TypeError("Failed to fetch"),
+            "Mike couldn't reach the server. Check your connection and try again.",
+        ],
+    ])("explains %s instead of a generic line", async (_label, thrown, shown) => {
+        login.mockRejectedValue(thrown);
+        const user = userEvent.setup();
+        render(<LoginPage />);
+
+        await user.type(
+            screen.getByRole("textbox", { name: "Email" }),
+            "person@example.com",
+        );
+        await user.type(screen.getByLabelText("Password"), "correct-horse");
+        await user.click(screen.getByRole("button", { name: "Log in" }));
+
+        expect(await screen.findByRole("alert")).toHaveTextContent(shown);
+    });
+
+    it("offers Retry for a failure that may pass on a second attempt", async () => {
+        login.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+        login.mockResolvedValueOnce({ user: { id: "user-1" } });
+        const user = userEvent.setup();
+        render(<LoginPage />);
+
+        await user.type(
+            screen.getByRole("textbox", { name: "Email" }),
+            "person@example.com",
+        );
+        await user.type(screen.getByLabelText("Password"), "correct-horse");
+        await user.click(screen.getByRole("button", { name: "Log in" }));
+
+        await user.click(await screen.findByRole("button", { name: "Retry" }));
+
+        expect(login).toHaveBeenCalledTimes(2);
         expect(push).toHaveBeenCalledWith("/onboarding/profile");
     });
 
@@ -195,7 +258,24 @@ describe("LoginPage", () => {
         expect(signup).not.toHaveBeenCalled();
         expect(push).not.toHaveBeenCalled();
         expect(screen.getByRole("alert")).toHaveTextContent(
-            "Unable to continue as guest",
+            "Mike couldn't reach the server",
         );
+        login.mockResolvedValueOnce({ user: { id: "guest-1" } });
+        await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+        expect(login).toHaveBeenLastCalledWith("guest@mike.local", "secret");
+        expect(signup).not.toHaveBeenCalled();
+        expect(push).toHaveBeenCalledWith("/assistant");
     });
+});
+
+
+it("retries a failed session refresh without submitting the empty login form", async () => {
+    authState.error = "Unable to check your session.";
+    retrySession.mockRejectedValueOnce(new TypeError("Failed to fetch")).mockResolvedValueOnce(null);
+    render(<LoginPage />);
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Mike couldn't reach the server");
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(retrySession).toHaveBeenCalledTimes(2);
+    expect(login).not.toHaveBeenCalled();
 });
