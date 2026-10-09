@@ -22,9 +22,9 @@ const keys: ApiKeyState = {
 };
 
 const routerSelections = {
-    openRouterModels: ["openai/gpt-5.4"],
-    vercelModels: [],
-    openCodeGoModels: [],
+    openrouter: ["openai/gpt-5.4"],
+    vercel: [],
+    "opencode-go": [],
 };
 
 describe("useSelectedModel", () => {
@@ -62,7 +62,10 @@ describe("useSelectedModel", () => {
                 useSelectedModel({
                     chatModel: bedrockModel,
                     lastSelectedModel: "gpt-6-luna",
-                    routerSelections: { ...routerSelections, bedrockModels },
+                    routerSelections: {
+                        ...routerSelections,
+                        bedrock: bedrockModels,
+                    },
                     apiKeys: keys,
                 }),
             ).result.current[0];

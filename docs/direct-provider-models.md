@@ -70,7 +70,7 @@ its own saved region or endpoint, never the deployment's, and removing it
 restores the environment pair.
 
 Neither platform publishes a catalog a key can list, so models are added by ID
-under Bring Your Own Keys → Routers once the key is saved:
+in the provider's dialog under Bring Your Own Keys once the key is saved:
 
 - **Bedrock:** model or inference-profile IDs enabled in the account and
   region, such as `us.anthropic.claude-opus-5-5`, `amazon.nova-pro-v1:0`, or an
@@ -141,6 +141,14 @@ saved list.
   and cloud-metadata addresses are refused, including when a public name
   resolves to one. Endpoints on a private network belong in
   `MIKE_MODEL_CONFIG_JSON`.
+
+Vertex AI and Foundry infer the protocol from the model or deployment name.
+When a name does not reveal it, save the ID with an explicit protocol:
+`anthropic:<name>` for Anthropic Messages, `openai:<name>` for Chat
+Completions (the partner-model endpoint on Vertex), or `gemini:<name>` for the
+Gemini API on Vertex. The prefix selects the protocol and is not sent upstream;
+for example a Foundry Claude deployment named `prod-sonnet` is saved as
+`anthropic:prod-sonnet`.
 
 Before deploying this version to an existing database, apply
 `backend/migrations/20261009_01_vertex_foundry_xai_custom_user_api_keys.sql`,

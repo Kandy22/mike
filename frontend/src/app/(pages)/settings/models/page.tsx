@@ -13,20 +13,13 @@ import {
 } from "@/shared/ui/dropdown";
 import { useUserProfile } from "@/app/contexts/UserProfileContext";
 import { type ApiKeyState } from "@/app/lib/mikeApi";
+import { routerModelsFromProfile } from "@/app/lib/routerModels";
 import {
   MODELS,
   SETTINGS_MODELS,
-  azureModelOptions,
-  azureFoundryModelOptions,
-  vertexModelOptions,
-  xaiModelOptions,
-  customModelOptions,
-  bedrockModelOptions,
   canonicalModelId,
   mergeConfiguredModelOptions,
-  openCodeGoModelOptions,
-  openRouterModelOptions,
-  vercelModelOptions,
+  routerModelOptions,
   type ModelOption,
 } from "@/app/components/assistant/ModelToggle";
 import { orderedModelGroups } from "@/shared/ui/ModelToggleUI";
@@ -63,21 +56,9 @@ export default function ModelPreferencesPage() {
     Partial<Record<ModelPreferenceField, string>>
   >({});
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const openRouterSelection = profile?.openRouterModels ?? [];
-  const vercelSelection = profile?.vercelModels ?? [];
-  const selectedOpenRouterOptions = openRouterModelOptions(openRouterSelection);
-  const selectedVercelOptions = vercelModelOptions(vercelSelection);
-  const selectedOpenCodeGoOptions = openCodeGoModelOptions(
-    profile?.openCodeGoModels ?? [],
+  const selectedRouterOptions = routerModelOptions(
+    routerModelsFromProfile(profile),
   );
-  const selectedBedrockOptions = bedrockModelOptions(
-    profile?.bedrockModels ?? [],
-  );
-  const selectedAzureOptions = azureModelOptions(profile?.azureModels ?? []);
-  const selectedAzureFoundryOptions = azureFoundryModelOptions(profile?.azureFoundryModels ?? []);
-  const selectedVertexOptions = vertexModelOptions(profile?.vertexModels ?? []);
-  const selectedXaiOptions = xaiModelOptions(profile?.xaiModels ?? []);
-  const selectedCustomOptions = customModelOptions(profile?.customModels ?? []);
 
   useEffect(() => {
     return () => {
@@ -125,15 +106,7 @@ export default function ModelPreferencesPage() {
               )}
               options={mergeConfiguredModelOptions(configuredModels, [
                 ...SETTINGS_MODELS,
-                ...selectedOpenRouterOptions,
-                ...selectedVercelOptions,
-                ...selectedOpenCodeGoOptions,
-                ...selectedBedrockOptions,
-                ...selectedAzureOptions,
-                ...selectedAzureFoundryOptions,
-                ...selectedVertexOptions,
-                ...selectedXaiOptions,
-                ...selectedCustomOptions,
+                ...selectedRouterOptions,
                 ...ollamaModels,
               ])}
               apiKeys={profile?.apiKeys}
@@ -157,15 +130,7 @@ export default function ModelPreferencesPage() {
               )}
               options={mergeConfiguredModelOptions(configuredModels, [
                 ...MODELS,
-                ...selectedOpenRouterOptions,
-                ...selectedVercelOptions,
-                ...selectedOpenCodeGoOptions,
-                ...selectedBedrockOptions,
-                ...selectedAzureOptions,
-                ...selectedAzureFoundryOptions,
-                ...selectedVertexOptions,
-                ...selectedXaiOptions,
-                ...selectedCustomOptions,
+                ...selectedRouterOptions,
                 ...ollamaModels,
               ])}
               apiKeys={profile?.apiKeys}
@@ -192,15 +157,7 @@ export default function ModelPreferencesPage() {
               )}
               options={mergeConfiguredModelOptions(configuredModels, [
                 ...SETTINGS_MODELS,
-                ...selectedOpenRouterOptions,
-                ...selectedVercelOptions,
-                ...selectedOpenCodeGoOptions,
-                ...selectedBedrockOptions,
-                ...selectedAzureOptions,
-                ...selectedAzureFoundryOptions,
-                ...selectedVertexOptions,
-                ...selectedXaiOptions,
-                ...selectedCustomOptions,
+                ...selectedRouterOptions,
                 ...ollamaModels,
               ])}
               apiKeys={profile?.apiKeys}

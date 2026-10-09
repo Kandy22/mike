@@ -430,7 +430,7 @@ async function createConfiguredAdapter(
 ): Promise<AiSdkAdapterConfig> {
   const configured = configuredModelOrThrow(id);
   if (configured.apiKeyProvider && apiKeys?.disabledProviders?.includes(configured.apiKeyProvider)) {
-    throw new UserFacingError("This model provider is turned off. Turn it on in Model Providers or select another model.");
+    throw new UserFacingError("This model provider is turned off. Turn it on in Settings → Bring Your Own Keys or select another model.");
   }
   const { createOpenAICompatible } = await import("@ai-sdk/openai-compatible");
   const apiKey = apiKeyForConfiguredModel(configured, apiKeys);
@@ -469,7 +469,7 @@ async function createConfiguredAdapter(
 
 function unsupportedOpenCodeGoModel(model: string): Error {
   return new Error(
-    `OpenCode Go model ${openCodeGoModelId(model)} requires a protocol Mike does not support yet. Select a model listed in Settings → Bring Your Own Keys → Routers.`,
+    `OpenCode Go model ${openCodeGoModelId(model)} requires a protocol Mike does not support yet. Select a model listed under OpenCode Go in Settings → Bring Your Own Keys.`,
   );
 }
 
@@ -495,7 +495,7 @@ async function createProviderAdapter(
 ): Promise<AiSdkAdapterConfig> {
   const provider = providerForModel(model);
   if (apiKeys?.disabledProviders?.includes(provider)) {
-    throw new UserFacingError("This model provider is turned off. Turn it on in Model Providers or select another model.");
+    throw new UserFacingError("This model provider is turned off. Turn it on in Settings → Bring Your Own Keys or select another model.");
   }
 
   if (provider === "claude") {
