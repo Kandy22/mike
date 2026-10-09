@@ -1,8 +1,7 @@
 # End-to-end tests in CI
 
 The Playwright suite (`e2e/`) runs on every pull request through
-`.github/workflows/e2e.yml`. This document covers the one repository secret it
-needs and the **branch-protection step that turns a red run into a blocked
+`.github/workflows/e2e.yml`. This document covers its local test services and the **branch-protection step that turns a red run into a blocked
 merge** — the workflow reports pass/fail on its own, but only branch protection
 makes that check *required*.
 
@@ -70,9 +69,9 @@ dropped), each on two workers. On every PR they report as **Assistant streaming
 keeps that job short. See [frontend-testing.md](frontend-testing.md#assistant-streaming-regressions)
 for a standalone local command.
 
-Four live-provider cases remain key-gated; the synthetic streaming and history
-stress cases always run. Use the current Playwright summary as the source of
-truth for totals, failures and skips.
+The full-stack chat flows use a local Anthropic-protocol fixture in CI. No paid
+model key or repository secret is required, including on fork PRs. A missing
+fixture key fails test discovery instead of silently skipping chat coverage.
 
 ### Development stress jobs
 
@@ -112,89 +111,70 @@ The production suite retries failed specs up to twice on CI and records a
 **trace** on the first retry. Development stress uses **zero retries** and
 retains traces on failure, so an intermittent loop cannot pass on a retry.
 On pass, fail, or timeout, each full-stack job uploads `playwright-report/`,
-`test-results/` and the web-server log as **`playwright-report-production`** or
+`test-results/`, the web-server log and the model-fixture log as **`playwright-report-production`** or
 **`playwright-report-development`** (14-day retention). The focused development
 job uploads **`assistant-streaming-development`** with the same failure evidence.
 From the failed run's page in the Actions tab, download its artifact, then
 `npx playwright show-report playwright-report` locally to see per-spec results,
 screenshots, and step-by-step traces of what the browser did.
 
-## Optional secret (fuller coverage)
+## Deterministic model provider
 
-| Secret | What it unlocks | Without it |
-|---|---|---|
-| `ANTHROPIC_API_KEY` | The 4 LLM-dependent specs (chat rename/delete/submit, critical-path "ask a question") send a message and assert a **streamed** answer. With the key set they run and are enforced. | Those 4 specs **skip** (see `e2e/llm.ts`) instead of hanging, the remaining keyless cases still run. |
+The workflow starts `e2e/anthropic-stub.mjs` on loopback port 4141 and sets
+`ANTHROPIC_BASE_URL=http://127.0.0.1:4141/v1` plus a dummy API key. The installed
+Anthropic SDK supports this endpoint override. Browser requests still traverse
+the real web gateway, authentication, backend, database, document storage, and
+assistant streaming code; only the external model response is a fixture.
 
-The suite is green **without** any secret — the LLM specs skip themselves via
-`test.skip(!process.env.ANTHROPIC_API_KEY, …)`, which keeps keyless runs (local,
-and fork PRs with no secret access) green and fast. Mike supports keyless local
-models through Ollama, but this CI job does not provision an Ollama server or
-pull a model. Without the Anthropic secret, the four live-response tests
-therefore have no model available in the CI environment and must skip. The
-auto title-generation call is not the reason for the gate; failures there are
-already treated as best-effort.
+Two browser flows cover the real application with only the external provider
+replaced:
 
-## Enable the LLM specs
+- **Chat lifecycle:** send a unique phrase through the provider, wait for the
+  completed answer, reload it, rename the chat and reload, then delete it and
+  verify a fresh history request returns 404. Optimistic UI changes alone do
+  not pass.
+- **Project document:** create a project, upload the PDF, open the empty composer
+  and send a question. The provider fixture selects the advertised document,
+  requests `read_document`, and echoes the actual tool result. The browser
+  requires text found only inside the PDF and verifies the saved answer after
+  reload. Missing context, broken tool dispatch or failed extraction cannot
+  produce the expected answer.
 
-### 1. Add the repository secret
+These replace the overlapping rename, delete, missing-chat “cold load” and
+submit-only project checks; they do not add more browser scenarios. The fixture
+also supplies a short non-streaming title. Three small checks exercise its JSON,
+text stream and tool round trip through the installed backend SDK before startup.
+Unknown streamed prompts and missing document/tool context fail explicitly.
 
-UI path:
+### Choosing the test boundary
 
-1. Open the repository on GitHub → **Settings**.
-2. In the left sidebar: **Secrets and variables → Actions**.
-3. On the **Secrets** tab, click **New repository secret**.
-4. **Name:** `ANTHROPIC_API_KEY` — exactly this name; both the workflow env and
-   `e2e/llm.ts` read it. **Secret:** an Anthropic API key (`sk-ant-…`) from
-   <https://console.anthropic.com/settings/keys>.
-5. Click **Add secret**.
+Start with a concrete failure the test must catch. Keep the code responsible
+for that behavior real, and use the lowest layer that observes the outcome.
+For these flows, auth, database persistence, storage, extraction, tool dispatch
+and browser rendering stay real. Only the external model is scripted. The
+existing synthetic browser tests deliberately isolate rendering and timing;
+they do not establish backend correctness.
 
-CLI equivalent (repo admin):
+A fixture cannot establish that Anthropic accepts the real request, that a real
+model chooses the right tool, or that its answer is accurate. Those questions
+need live-provider smoke checks and representative document evaluations with
+expected facts and citations. A real-key local run is available below; this
+workflow does not provide an automated live-model quality gate. The SDK checks
+prove fixture compatibility with the installed client, not provider fidelity.
+When reviewing a test, identify a plausible broken implementation that would
+fail it. Prefer strengthening or replacing an existing test over adding another
+scenario that observes the same behavior.
 
-```bash
-gh secret set ANTHROPIC_API_KEY --repo Open-Legal-Products/mike
-# paste the key at the prompt (or pipe it: --body "$ANTHROPIC_API_KEY")
-```
+The shared `selectClaudeModel` helper selects a supported Anthropic model before
+each chat submission. Keep its model label synchronized with the model catalog.
+Check the **Run Playwright** summary and uploaded report for passing tests with
+no unexpected skips; do not rely on a green job that omitted chat coverage.
 
-### 2. The fork-PR caveat
-
-On `pull_request` events from **forks**, GitHub withholds repository secrets, so
-fork PRs — most external contributions — still run keyless and skip the 4 specs.
-That is by design and keeps those runs green. Runs that actually receive the
-secret and exercise the specs are:
-
-- PRs from branches pushed to this repository (maintainer branches), and
-- manual runs: **Actions → e2e → Run workflow** (`workflow_dispatch`) on any
-  branch.
-
-So after adding the secret, the quickest way to see the specs run is a
-`workflow_dispatch` run from the Actions tab.
-
-### 3. Expected cost per run
-
-A handful of short completions: one streamed chat answer per LLM spec plus a few
-small title generations (`claude-haiku-4-5`, 64-token cap). On the order of a
-few cents per run — negligible next to the CI minutes.
-
-### 4. Confirm the specs ran (not skipped)
-
-Open the **Run Playwright** step in the Actions log:
-
-- **Keyless run:** the summary includes `4 skipped`, and each
-  skipped spec carries the reason
-  `requires a model key — set the ANTHROPIC_API_KEY secret to run LLM-dependent specs`.
-- **With the secret:** all cases pass with **no `skipped` line**;
-  searching the log for `requires a model key` finds nothing.
-
-The uploaded `playwright-report-production` and `playwright-report-development`
-artifacts show the same per-spec statuses.
-
-### Model selection
-
-When the secret is present, the shared `selectClaudeModel` helper selects a
-supported Anthropic model before each gated test submits. The response checks
-assert a nonempty streamed assistant answer rather than provider-specific text.
-Keep that helper synchronized with the current model catalog when model ids or
-display names change.
+For a local run with the same fixture, start `node e2e/anthropic-stub.mjs` and
+export both variables above (use `ANTHROPIC_API_KEY=e2e-local-key`) before starting
+the backend and Playwright. Local runs can instead use a live Anthropic key with
+no endpoint override. Local runs without either configuration skip the chat
+flows; CI rejects that incomplete configuration.
 
 ## Make it merge-blocking
 
