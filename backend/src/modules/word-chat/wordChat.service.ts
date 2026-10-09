@@ -26,6 +26,7 @@ import {
   buildUserPersonalisationPrompt,
   buildWordChatSystemPrompt,
   buildWorkflowStore,
+  attachPriorReasoning,
   enrichWithPriorEvents,
   loadUserMessageSentTimes,
   generateSpotlightNonce,
@@ -42,6 +43,7 @@ import {
   resolveEffectiveChatModel,
   resolveEffectiveReasoningLevel,
 } from "../../lib/modelSelection";
+import { replaysReasoning } from "../../lib/llm/registry";
 import type { WordEditApplyMode } from "../chat/chat.service";
 
 type LookupResult<T> =
@@ -771,9 +773,17 @@ export async function prepareWordChatStream(
       })),
     ];
     const nonce = generateSpotlightNonce(persistChat ? chatId : null);
+    const historyMessages = replaysReasoning(selectedModel)
+      ? await attachPriorReasoning(
+          messages,
+          persistChat ? chatId : null,
+          db,
+          "word_chat_messages",
+        )
+      : messages;
     const timeZone = resolveRequestTimeZone(args.requestedTimeZone);
     const enrichedMessages = await enrichWithPriorEvents(
-      messages,
+      historyMessages,
       persistChat ? chatId : null,
       db,
       docIndex,
